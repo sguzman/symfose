@@ -122,7 +122,7 @@ impl Default for AudioConfig {
     Self {
       instrument:          "piano"
         .to_string(),
-      master_volume:       0.22,
+      master_volume:       0.68,
       note_duration_ms:    680,
       release_duration_ms: 720,
       sample_rate_hz:      48_000,
@@ -342,12 +342,12 @@ pub fn write_default(
 fn validate_config(
   config: &AppConfig
 ) -> Result<()> {
-  if !(0.0..=1.0).contains(
+  if !(0.0..=2.5).contains(
     &config.audio.master_volume
   ) {
     bail!(
       "audio.master_volume must be \
-       between 0.0 and 1.0"
+       between 0.0 and 2.5"
     );
   }
 

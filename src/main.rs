@@ -10,9 +10,18 @@ use std::collections::{
   HashSet
 };
 use std::env;
+use std::fmt::{
+  Display,
+  Formatter,
+  Result as FmtResult
+};
 use std::path::{
   Path,
   PathBuf
+};
+use std::time::{
+  Duration,
+  Instant
 };
 
 use anyhow::{
@@ -23,18 +32,26 @@ use iced::widget::{
   button,
   column,
   container,
+  pick_list,
   row,
   scrollable,
-  text
+  slider,
+  space,
+  stack,
+  text,
+  toggler
 };
 use iced::{
+  Color,
   Element,
   Length,
   Subscription,
   Task,
   Theme,
+  border,
   event,
-  keyboard
+  keyboard,
+  time
 };
 use tracing::{
   debug,
@@ -46,7 +63,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{
   EnvFilter,
-  fmt
+  fmt as tracing_fmt
 };
 
 use crate::audio::AudioEngine;
@@ -61,8 +78,21 @@ use crate::input::{
 };
 use crate::songs::{
   LoadedSong,
+  SongFile,
   load_song_library
 };
+
+const FLASH_DURATION: Duration =
+  Duration::from_millis(170);
+const TICK_RATE: Duration =
+  Duration::from_millis(16);
+const TIMER_WINDOW_SECONDS: f32 = 0.18;
+const TIMER_PERFECT_SECONDS: f32 = 0.07;
+
+const WHITE_KEY_WIDTH: f32 = 72.0;
+const WHITE_KEY_HEIGHT: f32 = 250.0;
+const BLACK_KEY_WIDTH: f32 = 44.0;
+const BLACK_KEY_HEIGHT: f32 = 152.0;
 
 #[derive(Debug)]
 struct RuntimeBindings {
@@ -76,14 +106,169 @@ struct RuntimeBindings {
 }
 
 struct PianoApp {
-  config:         AppConfig,
-  bindings:       RuntimeBindings,
-  songs:          Vec<LoadedSong>,
-  audio:          AudioEngine,
-  selected_song:  Option<usize>,
-  active_notes:   HashSet<u8>,
-  activity:       Vec<String>,
-  startup_notice: String
+  config:           AppConfig,
+  bindings:         RuntimeBindings,
+  songs:            Vec<LoadedSong>,
+  audio:            AudioEngine,
+  selected_song:    Option<usize>,
+  prepared_song: Option<PreparedSong>,
+  held_notes:       HashSet<u8>,
+  flashed_notes: HashMap<u8, Instant>,
+  activity:         Vec<String>,
+  startup_notice:   String,
+  play_mode:        PlayMode,
+  tutorial_options: TutorialOptions,
+  playback: Option<PlaybackState>,
+  last_timer_score: Option<TimerScore>,
+  volume:           f32
+}
+
+#[derive(Debug, Clone)]
+struct PreparedSong {
+  events:           Vec<PreparedEvent>,
+  expected_notes:   Vec<ExpectedNote>,
+  duration_seconds: f32,
+  beat_seconds:     f32
+}
+
+#[derive(Debug, Clone)]
+struct PreparedEvent {
+  at_seconds:       f32,
+  duration_seconds: f32,
+  duration_ms:      u64,
+  velocity:         u8,
+  notes:            Vec<u8>
+}
+
+#[derive(Debug, Clone)]
+struct ExpectedNote {
+  at_seconds: f32,
+  midi_note:  u8
+}
+
+#[derive(
+  Debug, Clone, Copy, PartialEq, Eq,
+)]
+enum PlayMode {
+  Timer,
+  Tutorial,
+  Autoplay
+}
+
+impl PlayMode {
+  const ALL: [PlayMode; 3] = [
+    PlayMode::Timer,
+    PlayMode::Tutorial,
+    PlayMode::Autoplay
+  ];
+}
+
+impl Display for PlayMode {
+  fn fmt(
+    &self,
+    f: &mut Formatter<'_>
+  ) -> FmtResult {
+    let label = match self {
+      | PlayMode::Timer => "Timer",
+      | PlayMode::Tutorial => {
+        "Tutorial"
+      }
+      | PlayMode::Autoplay => {
+        "Auto Play"
+      }
+    };
+
+    write!(f, "{label}")
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TutorialOptions {
+  only_advance_on_correct_note: bool,
+  play_bad_notes_out_loud:      bool
+}
+
+impl Default for TutorialOptions {
+  fn default() -> Self {
+    Self {
+      only_advance_on_correct_note:
+        true,
+      play_bad_notes_out_loud:
+        true
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+struct TimerScore {
+  expected_notes: usize,
+  hit_notes:      usize,
+  perfect_hits:   usize,
+  good_hits:      usize,
+  wrong_notes:    usize,
+  missed_notes:   usize
+}
+
+impl TimerScore {
+  fn new(
+    expected_notes: usize
+  ) -> Self {
+    Self {
+      expected_notes,
+      hit_notes: 0,
+      perfect_hits: 0,
+      good_hits: 0,
+      wrong_notes: 0,
+      missed_notes: 0
+    }
+  }
+
+  fn accuracy_percent(&self) -> f32 {
+    if self.expected_notes == 0 {
+      return 0.0;
+    }
+
+    (self.hit_notes as f32
+      / self.expected_notes as f32)
+      * 100.0
+  }
+}
+
+#[derive(Debug)]
+struct PlaybackState {
+  mode:                  PlayMode,
+  started_at:            Instant,
+  cursor_seconds:        f32,
+  next_event_index:      usize,
+  tutorial_event_index:  usize,
+  tutorial_matched:      HashSet<u8>,
+  next_metronome_beat_s: f32,
+  next_metronome_index:  u64,
+  matched_note_indices:  HashSet<usize>,
+  score:                 TimerScore
+}
+
+impl PlaybackState {
+  fn new(
+    mode: PlayMode,
+    prepared: &PreparedSong
+  ) -> Self {
+    Self {
+      mode,
+      started_at: Instant::now(),
+      cursor_seconds: 0.0,
+      next_event_index: 0,
+      tutorial_event_index: 0,
+      tutorial_matched: HashSet::new(),
+      next_metronome_beat_s: 0.0,
+      next_metronome_index: 0,
+      matched_note_indices:
+        HashSet::new(),
+      score: TimerScore::new(
+        prepared.expected_notes.len()
+      )
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -93,7 +278,16 @@ enum Message {
     iced::event::Status
   ),
   SelectSong(usize),
-  PlaySelectedSong
+  StartPlayback,
+  RestartPlayback,
+  StopPlayback,
+  VolumeChanged(f32),
+  PlayModeSelected(PlayMode),
+  TutorialAdvanceOnlyCorrectChanged(
+    bool
+  ),
+  TutorialPlayBadNotesChanged(bool),
+  Tick(Instant)
 }
 
 fn main() -> Result<()> {
@@ -136,27 +330,46 @@ fn main() -> Result<()> {
   let audio =
     AudioEngine::new(&config.audio)?;
 
+  let selected_song =
+    if songs.is_empty() {
+      None
+    } else {
+      Some(0)
+    };
+
+  let prepared_song = selected_song
+    .and_then(|index| {
+      songs.get(index).map(|song| {
+        prepare_song(&song.song)
+      })
+    });
+
   let initial_state = PianoApp {
     startup_notice: format!(
       "Loaded {} song(s) from {}",
       songs.len(),
       config.song_library.directory
     ),
-    selected_song: if songs.is_empty() {
-      None
-    } else {
-      Some(0)
-    },
+    selected_song,
+    prepared_song,
+    volume: audio.master_volume(),
     config,
     bindings,
     songs,
     audio,
-    active_notes: HashSet::new(),
+    held_notes: HashSet::new(),
+    flashed_notes: HashMap::new(),
     activity: vec![
       "Press mapped keys to play. \
-       Press F5 to play selected song."
+       Choose a song mode and press \
+       Start."
         .to_string(),
-    ]
+    ],
+    play_mode: PlayMode::Timer,
+    tutorial_options:
+      TutorialOptions::default(),
+    playback: None,
+    last_timer_score: None
   };
 
   let state_slot =
@@ -176,7 +389,7 @@ fn main() -> Result<()> {
     view
   )
   .title(app_title)
-  .window_size((1320.0, 780.0))
+  .window_size((1380.0, 860.0))
   .centered()
   .theme(app_theme)
   .subscription(subscription)
@@ -207,54 +420,47 @@ fn update(
       }
     }
     | Message::SelectSong(index) => {
-      app.selected_song = Some(index);
-      if let Some(song) =
-        app.songs.get(index)
-      {
-        let song_id =
-          song.song.meta.id.clone();
-        let song_title =
-          song.song.meta.title.clone();
-        let line = format!(
-          "Selected song: {}",
-          song_title
-        );
-        app.push_activity(line.clone());
-        info!(song_id = %song_id, title = %song_title, "song selected");
-      }
+      app.select_song(index);
     }
-    | Message::PlaySelectedSong => {
-      if let Some(song_index) =
-        app.selected_song
-      {
-        if let Some(song) =
-          app.songs.get(song_index)
-        {
-          let song_id =
-            song.song.meta.id.clone();
-          let song_title = song
-            .song
-            .meta
-            .title
-            .clone();
-          app
-            .audio
-            .play_song(&song.song);
-          let line = format!(
-            "Playing song preview: {}",
-            song_title
-          );
-          app.push_activity(
-            line.clone()
-          );
-          info!(song_id = %song_id, title = %song_title, "song playback started");
-        }
-      } else {
-        app.push_activity(
-          "No song selected."
-            .to_string()
-        );
-      }
+    | Message::StartPlayback => {
+      app.start_playback();
+    }
+    | Message::RestartPlayback => {
+      app.start_playback();
+    }
+    | Message::StopPlayback => {
+      app.stop_playback();
+    }
+    | Message::VolumeChanged(volume) => {
+      app.set_volume(volume);
+    }
+    | Message::PlayModeSelected(mode) => {
+      app.play_mode = mode;
+      app.push_activity(format!(
+        "Mode selected: {mode}"
+      ));
+      info!(?mode, "play mode selected");
+    }
+    | Message::TutorialAdvanceOnlyCorrectChanged(
+      value
+    ) => {
+      app
+        .tutorial_options
+        .only_advance_on_correct_note =
+        value;
+      info!(value, "tutorial only_advance_on_correct_note updated");
+    }
+    | Message::TutorialPlayBadNotesChanged(
+      value
+    ) => {
+      app
+        .tutorial_options
+        .play_bad_notes_out_loud =
+        value;
+      info!(value, "tutorial play_bad_notes_out_loud updated");
+    }
+    | Message::Tick(now) => {
+      app.handle_tick(now);
     }
   }
 
@@ -349,8 +555,7 @@ fn handle_runtime_event(
           .len();
         app.push_activity(format!(
           "Loaded {count} key \
-           bindings. See left panel \
-           for mapping."
+           bindings."
         ));
         return None;
       }
@@ -361,7 +566,7 @@ fn handle_runtime_event(
         .contains(&chord)
       {
         return Some(Task::done(
-          Message::PlaySelectedSong
+          Message::StartPlayback
         ));
       }
 
@@ -372,16 +577,26 @@ fn handle_runtime_event(
         .copied()
       {
         app
-          .active_notes
+          .held_notes
           .insert(midi_note);
-        app.audio.play_note(midi_note);
+        app.flash_note(midi_note);
+
+        let play_out_loud = app
+          .process_note_input(
+            midi_note
+          );
+        if play_out_loud {
+          app
+            .audio
+            .play_note(midi_note);
+        }
 
         let label = format!(
           "{chord} -> {} ({midi_note})",
           midi_note_name(midi_note)
         );
-        app
-          .push_activity(label.clone());
+        app.push_activity(label);
+
         info!(%chord, midi_note, note = %midi_note_name(midi_note), "mapped key pressed");
       } else if app
         .config
@@ -422,7 +637,7 @@ fn handle_runtime_event(
         .copied()
       {
         app
-          .active_notes
+          .held_notes
           .remove(&midi_note);
       }
     }
@@ -451,10 +666,9 @@ fn view(
       text("Symposium Virtual Piano")
         .size(34),
       text(
-        "Keyboard-driven piano with \
-         configurable bindings, song \
-         library, and realistic \
-         SoundFont synthesis."
+        "Virtual piano workflow with \
+         timer scoring, tutorial \
+         guidance, and auto play."
       )
       .size(16),
       text(&app.startup_notice)
@@ -532,7 +746,7 @@ fn controls_panel(
         .join(" or ")
     )),
     text(format!(
-      "Play Selected Song: {}",
+      "Start Song Mode: {}",
       app
         .config
         .control_bindings
@@ -572,46 +786,14 @@ fn controls_panel(
 fn piano_panel(
   app: &PianoApp
 ) -> Element<'_, Message> {
-  let mut row_keys = row!().spacing(8);
-
-  for (note, chords) in
-    &app.bindings.note_to_chords
-  {
-    let active =
-      app.active_notes.contains(note);
-    let label = chords.join(" / ");
-
-    let key_card = container(
-      column![
-        text(midi_note_name(*note))
-          .size(20),
-        text(format!("MIDI {note}"))
-          .size(14),
-        text(label).size(13),
-      ]
-      .spacing(3)
-    )
-    .width(86)
-    .padding(8)
-    .style(
-      if active {
-        container::success
-      } else {
-        container::bordered_box
-      }
-    );
-
-    row_keys = row_keys.push(key_card);
-  }
-
   let active_line = if app
-    .active_notes
+    .held_notes
     .is_empty()
   {
     "(none)".to_string()
   } else {
     let mut active = app
-      .active_notes
+      .held_notes
       .iter()
       .copied()
       .collect::<Vec<_>>();
@@ -624,7 +806,10 @@ fn piano_panel(
       .join(", ")
   };
 
-  container(
+  let playback_status =
+    app.playback_status_line();
+
+  let header = row![
     column![
       text("Piano").size(22),
       text(format!(
@@ -635,18 +820,312 @@ fn piano_panel(
           .active_profile_summary()
       )),
       text(format!(
-        "Active notes: {active_line}"
+        "Held notes: {active_line}"
       )),
-      scrollable(row_keys)
-        .height(Length::Fill),
+      text(playback_status),
     ]
-    .spacing(8)
+    .spacing(4)
+    .width(Length::FillPortion(4)),
+    column![
+      text(format!(
+        "Volume: {:.2}",
+        app.volume
+      )),
+      slider(
+        0.0..=2.5,
+        app.volume,
+        Message::VolumeChanged
+      )
+      .step(0.01)
+      .height(22),
+    ]
+    .spacing(4)
+    .width(Length::FillPortion(3)),
+  ]
+  .spacing(16);
+
+  let timeline =
+    song_timeline_panel(app);
+  let keyboard = piano_keyboard(app);
+
+  container(
+    column![
+      header,
+      timeline,
+      keyboard,
+    ]
+    .spacing(10)
     .height(Length::Fill)
   )
   .padding(12)
-  .width(Length::FillPortion(6))
+  .width(Length::FillPortion(8))
   .height(Length::Fill)
   .style(container::rounded_box)
+  .into()
+}
+
+fn song_timeline_panel(
+  app: &PianoApp
+) -> Element<'_, Message> {
+  let Some(prepared) =
+    app.prepared_song.as_ref()
+  else {
+    return container(text(
+      "Select a song to show timing \
+       tiles."
+    ))
+    .padding(8)
+    .style(container::bordered_box)
+    .into();
+  };
+
+  if prepared.events.is_empty() {
+    return container(text(
+      "Selected song has no events."
+    ))
+    .padding(8)
+    .style(container::bordered_box)
+    .into();
+  }
+
+  let cursor = app
+    .playback
+    .as_ref()
+    .map_or(0.0, |playback| {
+      playback.cursor_seconds
+    });
+
+  let mut chips = row!().spacing(6);
+
+  for (index, event) in
+    prepared.events.iter().enumerate()
+  {
+    let width =
+      (event.duration_seconds * 120.0)
+        .clamp(64.0, 220.0);
+
+    let notes = event
+      .notes
+      .iter()
+      .map(|note| {
+        app.primary_binding_label(*note)
+      })
+      .collect::<Vec<_>>()
+      .join(" ");
+
+    let is_current = app
+      .playback
+      .as_ref()
+      .is_some_and(|state| {
+        match state.mode {
+          | PlayMode::Tutorial => {
+            state.tutorial_event_index
+              == index
+          }
+          | PlayMode::Timer
+          | PlayMode::Autoplay => {
+            event.at_seconds <= cursor
+              && cursor
+                < event.at_seconds
+                  + event
+                    .duration_seconds
+                  + 0.08
+          }
+        }
+      });
+
+    let is_past = event.at_seconds
+      + event.duration_seconds
+      < cursor;
+
+    let tile_style =
+      timeline_tile_style(
+        is_current, is_past
+      );
+
+    chips = chips.push(
+      container(
+        column![
+          text(notes).size(22),
+          text(format!(
+            "{:.2}s",
+            event.at_seconds
+          ))
+          .size(12),
+        ]
+        .spacing(2)
+      )
+      .width(width)
+      .padding(6)
+      .style(move |_| tile_style)
+    );
+  }
+
+  let roll = scrollable(
+    container(chips)
+      .width(Length::Shrink)
+  )
+  .horizontal()
+  .height(160)
+  .width(Length::Fill);
+
+  container(
+    column![
+      text(
+        "Song Keys + Timing \
+         (virtual-piano style lane)"
+      )
+      .size(16),
+      roll,
+    ]
+    .spacing(6)
+  )
+  .padding(8)
+  .style(container::bordered_box)
+  .into()
+}
+
+fn piano_keyboard(
+  app: &PianoApp
+) -> Element<'_, Message> {
+  let (min_note, max_note) =
+    app.keyboard_note_range();
+
+  let white_notes = (min_note
+    ..=max_note)
+    .filter(|note| is_white_key(*note))
+    .collect::<Vec<_>>();
+
+  let mut white_row = row!().spacing(1);
+  for white_note in &white_notes {
+    white_row =
+      white_row.push(white_key_widget(
+        app,
+        *white_note
+      ));
+  }
+
+  let mut black_overlay =
+    row!().spacing(1);
+  for white_note in &white_notes {
+    if let Some(black_note) =
+      black_key_after(*white_note)
+    {
+      if black_note >= min_note
+        && black_note <= max_note
+      {
+        black_overlay = black_overlay
+          .push(
+            container(
+              black_key_widget(
+                app, black_note
+              )
+            )
+            .width(WHITE_KEY_WIDTH)
+            .center_x(WHITE_KEY_WIDTH)
+          );
+        continue;
+      }
+    }
+
+    black_overlay = black_overlay.push(
+      container(
+        space().width(WHITE_KEY_WIDTH)
+      )
+      .width(WHITE_KEY_WIDTH)
+    );
+  }
+
+  let white_count =
+    white_notes.len().max(1) as f32;
+  let keyboard_width = white_count
+    * (WHITE_KEY_WIDTH + 1.0);
+
+  let layers = stack([
+    container(white_row)
+      .height(WHITE_KEY_HEIGHT)
+      .into(),
+    container(black_overlay)
+      .height(WHITE_KEY_HEIGHT)
+      .align_y(iced::Top)
+      .into()
+  ])
+  .width(keyboard_width)
+  .height(WHITE_KEY_HEIGHT);
+
+  let scroller = scrollable(
+    container(layers)
+      .width(keyboard_width)
+      .height(WHITE_KEY_HEIGHT)
+      .padding(2)
+  )
+  .horizontal()
+  .height(WHITE_KEY_HEIGHT + 24.0)
+  .width(Length::Fill);
+
+  container(scroller)
+    .padding(6)
+    .style(container::bordered_box)
+    .into()
+}
+
+fn white_key_widget<'a>(
+  app: &PianoApp,
+  note: u8
+) -> Element<'a, Message> {
+  let active =
+    app.is_note_highlighted(note);
+  let guided =
+    app.guided_notes().contains(&note);
+
+  let label =
+    app.primary_binding_label(note);
+
+  let style =
+    white_key_style(active, guided);
+
+  container(
+    column![
+      space().height(Length::Fill),
+      text(label).size(18),
+      text(midi_note_name(note))
+        .size(12),
+    ]
+    .spacing(4)
+  )
+  .width(WHITE_KEY_WIDTH)
+  .height(WHITE_KEY_HEIGHT)
+  .padding([8, 6])
+  .style(move |_| style)
+  .into()
+}
+
+fn black_key_widget<'a>(
+  app: &PianoApp,
+  note: u8
+) -> Element<'a, Message> {
+  let active =
+    app.is_note_highlighted(note);
+  let guided =
+    app.guided_notes().contains(&note);
+
+  let label =
+    app.primary_binding_label(note);
+  let style =
+    black_key_style(active, guided);
+
+  container(
+    column![
+      text(label).size(16),
+      text(midi_note_name(note))
+        .size(11),
+    ]
+    .spacing(2)
+  )
+  .width(BLACK_KEY_WIDTH)
+  .height(BLACK_KEY_HEIGHT)
+  .padding([8, 4])
+  .style(move |_| style)
   .into()
 }
 
@@ -688,80 +1167,75 @@ fn songs_panel(
     }
   }
 
-  let details = if let Some(index) =
-    app.selected_song
-  {
-    if let Some(loaded) =
-      app.songs.get(index)
-    {
-      let beats =
-        loaded.duration_beats();
-      let seconds = beats
-        * (60.0
-          / loaded
-            .song
-            .meta
-            .tempo_bpm
-            .max(1.0));
+  let mode_picker = pick_list(
+    PlayMode::ALL,
+    Some(app.play_mode),
+    Message::PlayModeSelected
+  )
+  .placeholder("Mode")
+  .width(Length::Fill);
 
-      column![
-        text("Selected Song").size(22),
-        text(format!(
-          "ID: {}",
-          loaded.song.meta.id
-        )),
-        text(format!(
-          "Title: {}",
-          loaded.song.meta.title
-        )),
-        text(format!(
-          "Artist: {}",
-          loaded.song.meta.artist
-        )),
-        text(format!(
-          "Tempo: {:.0} BPM",
-          loaded.song.meta.tempo_bpm
-        )),
-        text(format!(
-          "Time Signature: {}/{}",
-          loaded
-            .song
-            .meta
-            .beats_per_bar,
-          loaded.song.meta.beat_unit
-        )),
-        text(format!(
-          "Events: {}",
-          loaded.song.events.len()
-        )),
-        text(format!(
-          "Duration: {:.2} beats \
-           ({seconds:.2}s)",
-          beats
-        )),
-        text(format!(
-          "File: {}",
-          loaded.path.display()
-        )),
-        button(text(
-          "Play Selected Song Preview"
-        ))
-        .on_press(
-          Message::PlaySelectedSong
-        ),
-      ]
-      .spacing(4)
-    } else {
-      column![text("No song selected.")]
-    }
-  } else {
-    column![text("No song selected.")]
-  };
+  let playback_controls = row![
+    button(text("Start"))
+      .on_press(Message::StartPlayback),
+    button(text("Restart")).on_press(
+      Message::RestartPlayback
+    ),
+    button(text("Stop"))
+      .on_press(Message::StopPlayback),
+  ]
+  .spacing(6);
+
+  let mut mode_specific = column![
+    text("Mode Options").size(18)
+  ]
+  .spacing(6)
+  .push(mode_picker)
+  .push(playback_controls);
+
+  if app.play_mode == PlayMode::Tutorial
+  {
+    mode_specific = mode_specific
+      .push(
+        toggler(
+          app
+            .tutorial_options
+            .only_advance_on_correct_note
+        )
+        .label(
+          "Only advance on correct \
+           note"
+        )
+        .on_toggle(
+          Message::TutorialAdvanceOnlyCorrectChanged
+        )
+      )
+      .push(
+        toggler(
+          app
+            .tutorial_options
+            .play_bad_notes_out_loud
+        )
+        .label(
+          "Play bad notes out loud"
+        )
+        .on_toggle(
+          Message::TutorialPlayBadNotesChanged
+        )
+      );
+  }
+
+  let details =
+    selected_song_details(app);
 
   container(
     scrollable(
-      column![songs_column, details]
-        .spacing(14)
+      column![
+        songs_column,
+        mode_specific,
+        details,
+      ]
+      .spacing(14)
     )
     .height(Length::Fill)
   )
@@ -772,10 +1246,126 @@ fn songs_panel(
   .into()
 }
 
+fn selected_song_details(
+  app: &PianoApp
+) -> Element<'_, Message> {
+  let Some(index) = app.selected_song
+  else {
+    return column![text(
+      "No song selected."
+    )]
+    .into();
+  };
+
+  let Some(loaded) =
+    app.songs.get(index)
+  else {
+    return column![text(
+      "No song selected."
+    )]
+    .into();
+  };
+
+  let prepared =
+    app.prepared_song.as_ref();
+  let duration_seconds = prepared
+    .map_or(0.0, |song| {
+      song.duration_seconds
+    });
+  let duration_beats =
+    loaded.duration_beats();
+
+  let mut info_column = column![
+    text("Selected Song").size(22),
+    text(format!(
+      "ID: {}",
+      loaded.song.meta.id
+    )),
+    text(format!(
+      "Title: {}",
+      loaded.song.meta.title
+    )),
+    text(format!(
+      "Artist: {}",
+      loaded.song.meta.artist
+    )),
+    text(format!(
+      "Tempo: {:.0} BPM",
+      loaded.song.meta.tempo_bpm
+    )),
+    text(format!(
+      "Events: {}",
+      loaded.song.events.len()
+    )),
+    text(format!(
+      "Duration: {duration_seconds:.\
+       2}s"
+    )),
+    text(format!(
+      "Duration (beats): \
+       {duration_beats:.2}"
+    )),
+    text(format!(
+      "File: {}",
+      loaded.path.display()
+    )),
+    text(format!(
+      "Cursor: {:.2}s",
+      app.playback.as_ref().map_or(
+        0.0,
+        |playback| {
+          playback.cursor_seconds
+        }
+      )
+    )),
+  ]
+  .spacing(4);
+
+  if let Some(score) = app
+    .playback
+    .as_ref()
+    .and_then(|playback| {
+      (playback.mode == PlayMode::Timer)
+        .then_some(&playback.score)
+    })
+  {
+    info_column =
+      info_column.push(text(format!(
+        "Live score: hit {} / {} \
+         ({:.1}%)",
+        score.hit_notes,
+        score.expected_notes,
+        score.accuracy_percent()
+      )));
+  }
+
+  if let Some(score) =
+    &app.last_timer_score
+  {
+    info_column =
+      info_column.push(text(format!(
+        "Last timer result: {:.1}% \
+         (perfect {} good {} wrong {} \
+         missed {})",
+        score.accuracy_percent(),
+        score.perfect_hits,
+        score.good_hits,
+        score.wrong_notes,
+        score.missed_notes
+      )));
+  }
+
+  info_column.into()
+}
+
 fn subscription(
   _app: &PianoApp
 ) -> Subscription<Message> {
-  event::listen_with(map_event)
+  Subscription::batch(vec![
+    event::listen_with(map_event),
+    time::every(TICK_RATE)
+      .map(Message::Tick),
+  ])
 }
 
 fn map_event(
@@ -808,13 +1398,195 @@ impl PianoApp {
   ) {
     self.activity.push(line);
 
-    const MAX_ENTRIES: usize = 30;
+    const MAX_ENTRIES: usize = 40;
     if self.activity.len() > MAX_ENTRIES
     {
       let overflow =
         self.activity.len()
           - MAX_ENTRIES;
       self.activity.drain(0..overflow);
+    }
+  }
+
+  fn set_volume(
+    &mut self,
+    volume: f32
+  ) {
+    let clamped =
+      volume.clamp(0.0, 2.5);
+    self.volume = clamped;
+    self
+      .audio
+      .set_master_volume(clamped);
+  }
+
+  fn flash_note(
+    &mut self,
+    midi_note: u8
+  ) {
+    let expires =
+      Instant::now() + FLASH_DURATION;
+    self
+      .flashed_notes
+      .insert(midi_note, expires);
+  }
+
+  fn prune_flashes(
+    &mut self,
+    now: Instant
+  ) {
+    self.flashed_notes.retain(
+      |_, expires| *expires > now
+    );
+  }
+
+  fn is_note_highlighted(
+    &self,
+    note: u8
+  ) -> bool {
+    self.held_notes.contains(&note)
+      || self
+        .flashed_notes
+        .get(&note)
+        .is_some_and(|until| {
+          *until > Instant::now()
+        })
+  }
+
+  fn playback_status_line(
+    &self
+  ) -> String {
+    match &self.playback {
+      | Some(playback) => {
+        format!(
+          "Mode: {} | Cursor: {:.2}s",
+          playback.mode,
+          playback.cursor_seconds
+        )
+      }
+      | None => {
+        "Mode idle. Choose Timer, \
+         Tutorial, or Auto Play."
+          .to_string()
+      }
+    }
+  }
+
+  fn keyboard_note_range(
+    &self
+  ) -> (u8, u8) {
+    let min_note = self
+      .bindings
+      .note_to_chords
+      .keys()
+      .next()
+      .copied()
+      .unwrap_or(60);
+    let max_note = self
+      .bindings
+      .note_to_chords
+      .keys()
+      .next_back()
+      .copied()
+      .unwrap_or(76);
+
+    (min_note, max_note)
+  }
+
+  fn primary_binding_label(
+    &self,
+    note: u8
+  ) -> String {
+    self
+      .bindings
+      .note_to_chords
+      .get(&note)
+      .and_then(|entries| {
+        entries.first()
+      })
+      .cloned()
+      .unwrap_or_else(|| {
+        "-".to_string()
+      })
+  }
+
+  fn guided_notes(
+    &self
+  ) -> HashSet<u8> {
+    let mut notes = HashSet::new();
+
+    let Some(playback) = &self.playback
+    else {
+      return notes;
+    };
+    let Some(prepared) =
+      &self.prepared_song
+    else {
+      return notes;
+    };
+
+    match playback.mode {
+      | PlayMode::Tutorial => {
+        if let Some(event) =
+          prepared.events.get(
+            playback
+              .tutorial_event_index
+          )
+        {
+          notes.extend(
+            event.notes.iter().copied()
+          );
+        }
+      }
+      | PlayMode::Timer
+      | PlayMode::Autoplay => {
+        let cursor =
+          playback.cursor_seconds;
+        for event in &prepared.events {
+          if (event.at_seconds - cursor)
+            .abs()
+            <= 0.12
+          {
+            notes.extend(
+              event
+                .notes
+                .iter()
+                .copied()
+            );
+          }
+        }
+      }
+    }
+
+    notes
+  }
+
+  fn select_song(
+    &mut self,
+    index: usize
+  ) {
+    self.selected_song = Some(index);
+    self.prepared_song =
+      self.songs.get(index).map(
+        |song| prepare_song(&song.song)
+      );
+
+    self.playback = None;
+    self.last_timer_score = None;
+
+    if let Some(song) =
+      self.songs.get(index)
+    {
+      let song_id =
+        song.song.meta.id.clone();
+      let song_title =
+        song.song.meta.title.clone();
+      let line = format!(
+        "Selected song: {}",
+        song_title
+      );
+      self.push_activity(line);
+      info!(song_id = %song_id, title = %song_title, "song selected");
     }
   }
 
@@ -835,22 +1607,455 @@ impl PianoApp {
       | None => 0
     };
 
-    self.selected_song = Some(next);
+    self.select_song(next);
+  }
 
-    if let Some(song) =
-      self.songs.get(next)
-    {
-      let song_id =
-        song.song.meta.id.clone();
-      let song_title =
-        song.song.meta.title.clone();
-      let line = format!(
-        "Selected song: {}",
-        song_title
+  fn start_playback(&mut self) {
+    let Some(prepared) =
+      self.prepared_song.as_ref()
+    else {
+      self.push_activity(
+        "Select a song before \
+         starting playback."
+          .to_string()
       );
-      self.push_activity(line.clone());
-      info!(song_id = %song_id, title = %song_title, "song selected via shortcut");
+      return;
+    };
+
+    if prepared.events.is_empty() {
+      self.push_activity(
+        "Selected song has no notes \
+         to play."
+          .to_string()
+      );
+      return;
     }
+
+    self.held_notes.clear();
+    self.flashed_notes.clear();
+    self.last_timer_score = None;
+
+    let mut state = PlaybackState::new(
+      self.play_mode,
+      prepared
+    );
+
+    if state.mode == PlayMode::Tutorial
+    {
+      state.cursor_seconds = prepared
+        .events
+        .first()
+        .map_or(0.0, |event| {
+          event.at_seconds
+        });
+    }
+
+    self.playback = Some(state);
+    self.push_activity(format!(
+      "Playback started in {} mode.",
+      self.play_mode
+    ));
+
+    info!(mode = %self.play_mode, "playback started");
+  }
+
+  fn stop_playback(&mut self) {
+    if self.playback.is_some() {
+      self.playback = None;
+      self.push_activity(
+        "Playback stopped.".to_string()
+      );
+      info!("playback stopped");
+    }
+  }
+
+  fn handle_tick(
+    &mut self,
+    now: Instant
+  ) {
+    self.prune_flashes(now);
+
+    let Some(mut playback) =
+      self.playback.take()
+    else {
+      return;
+    };
+
+    let Some(prepared) =
+      self.prepared_song.clone()
+    else {
+      return;
+    };
+
+    let mut keep_running = true;
+
+    match playback.mode {
+      | PlayMode::Timer => {
+        let elapsed = now
+          .duration_since(
+            playback.started_at
+          )
+          .as_secs_f32();
+        playback.cursor_seconds =
+          elapsed;
+
+        while elapsed
+          >= playback
+            .next_metronome_beat_s
+        {
+          let accent = playback
+            .next_metronome_index
+            % self
+              .selected_beats_per_bar()
+              as u64
+            == 0;
+          self
+            .audio
+            .play_metronome_tick(
+              accent
+            );
+          playback
+            .next_metronome_index += 1;
+          playback
+            .next_metronome_beat_s +=
+            prepared.beat_seconds;
+        }
+
+        if elapsed
+          > prepared.duration_seconds
+            + 1.2
+        {
+          playback.score.missed_notes =
+            playback
+              .score
+              .expected_notes
+              .saturating_sub(
+                playback
+                  .score
+                  .hit_notes
+              );
+
+          self.last_timer_score = Some(
+            playback.score.clone()
+          );
+
+          self.push_activity(format!(
+            "Timer complete: {:.1}% \
+             accuracy (perfect {} \
+             good {} wrong {} missed \
+             {}).",
+            playback
+              .score
+              .accuracy_percent(),
+            playback.score.perfect_hits,
+            playback.score.good_hits,
+            playback.score.wrong_notes,
+            playback.score.missed_notes,
+          ));
+
+          keep_running = false;
+          info!(
+            accuracy = playback
+              .score
+              .accuracy_percent(),
+            "timer mode finished"
+          );
+        }
+      }
+      | PlayMode::Autoplay => {
+        let elapsed = now
+          .duration_since(
+            playback.started_at
+          )
+          .as_secs_f32();
+        playback.cursor_seconds =
+          elapsed;
+
+        while let Some(event) = prepared
+          .events
+          .get(
+            playback.next_event_index
+          )
+          .cloned()
+        {
+          if event.at_seconds > elapsed
+          {
+            break;
+          }
+
+          self.trigger_event(&event);
+          playback.next_event_index +=
+            1;
+        }
+
+        if elapsed
+          > prepared.duration_seconds
+            + 0.8
+        {
+          self.push_activity(
+            "Auto Play complete."
+              .to_string()
+          );
+          keep_running = false;
+          info!("autoplay finished");
+        }
+      }
+      | PlayMode::Tutorial => {
+        if let Some(event) = prepared
+          .events
+          .get(
+            playback
+              .tutorial_event_index
+          )
+          .cloned()
+        {
+          playback.cursor_seconds =
+            event.at_seconds;
+        } else {
+          playback.cursor_seconds =
+            prepared.duration_seconds;
+          self.push_activity(
+            "Tutorial complete."
+              .to_string()
+          );
+          keep_running = false;
+          info!("tutorial finished");
+        }
+      }
+    }
+
+    if keep_running {
+      self.playback = Some(playback);
+    }
+  }
+
+  fn process_note_input(
+    &mut self,
+    midi_note: u8
+  ) -> bool {
+    let mut play_out_loud = true;
+
+    let Some(mut playback) =
+      self.playback.take()
+    else {
+      return play_out_loud;
+    };
+
+    let Some(prepared) =
+      self.prepared_song.clone()
+    else {
+      self.playback = Some(playback);
+      return play_out_loud;
+    };
+
+    let mut keep_running = true;
+
+    match playback.mode {
+      | PlayMode::Timer => {
+        let now = Instant::now();
+        let cursor = now
+          .duration_since(
+            playback.started_at
+          )
+          .as_secs_f32();
+        playback.cursor_seconds =
+          cursor;
+
+        let mut best_match: Option<(
+          usize,
+          f32
+        )> = None;
+
+        for (index, expected) in
+          prepared
+            .expected_notes
+            .iter()
+            .enumerate()
+        {
+          if expected.midi_note
+            != midi_note
+          {
+            continue;
+          }
+          if playback
+            .matched_note_indices
+            .contains(&index)
+          {
+            continue;
+          }
+
+          let delta = (expected
+            .at_seconds
+            - cursor)
+            .abs();
+          if delta
+            > TIMER_WINDOW_SECONDS
+          {
+            continue;
+          }
+
+          match best_match {
+            | Some((_, best_delta))
+              if delta
+                >= best_delta => {}
+            | _ => {
+              best_match =
+                Some((index, delta));
+            }
+          }
+        }
+
+        if let Some((index, delta)) =
+          best_match
+        {
+          playback
+            .matched_note_indices
+            .insert(index);
+          playback.score.hit_notes += 1;
+
+          if delta
+            <= TIMER_PERFECT_SECONDS
+          {
+            playback
+              .score
+              .perfect_hits += 1;
+          } else {
+            playback.score.good_hits +=
+              1;
+          }
+
+          debug!(
+            midi_note,
+            delta, "timer note matched"
+          );
+        } else {
+          playback.score.wrong_notes +=
+            1;
+          debug!(
+            midi_note,
+            "timer note missed"
+          );
+        }
+      }
+      | PlayMode::Tutorial => {
+        if let Some(event) = prepared
+          .events
+          .get(
+            playback
+              .tutorial_event_index
+          )
+          .cloned()
+        {
+          let correct = event
+            .notes
+            .contains(&midi_note);
+
+          if correct {
+            playback
+              .tutorial_matched
+              .insert(midi_note);
+
+            let expected_unique = event
+              .notes
+              .iter()
+              .copied()
+              .collect::<HashSet<_>>()
+              .len();
+
+            if playback
+              .tutorial_matched
+              .len()
+              >= expected_unique
+            {
+              playback
+                .tutorial_event_index += 1;
+              playback
+                .tutorial_matched
+                .clear();
+            }
+          } else {
+            play_out_loud = self
+              .tutorial_options
+              .play_bad_notes_out_loud;
+
+            if self
+              .tutorial_options
+              .only_advance_on_correct_note
+            {
+              self.push_activity(format!(
+                "Tutorial expects: {}",
+                event
+                  .notes
+                  .iter()
+                  .map(|note| self
+                    .primary_binding_label(
+                      *note
+                    ))
+                  .collect::<Vec<_>>()
+                  .join(" ")
+              ));
+            } else {
+              playback
+                .tutorial_event_index += 1;
+              playback
+                .tutorial_matched
+                .clear();
+            }
+          }
+
+          if playback
+            .tutorial_event_index
+            >= prepared.events.len()
+          {
+            keep_running = false;
+            self.push_activity(
+              "Tutorial complete."
+                .to_string()
+            );
+          }
+        }
+      }
+      | PlayMode::Autoplay => {
+        // Manual notes are allowed
+        // while autoplay runs.
+      }
+    }
+
+    if keep_running {
+      self.playback = Some(playback);
+    }
+
+    play_out_loud
+  }
+
+  fn trigger_event(
+    &mut self,
+    event: &PreparedEvent
+  ) {
+    for midi_note in &event.notes {
+      self.audio
+        .play_note_with_velocity_duration(
+          *midi_note,
+          event.velocity,
+          event.duration_ms
+        );
+      self.flash_note(*midi_note);
+    }
+  }
+
+  fn selected_beats_per_bar(
+    &self
+  ) -> u8 {
+    self
+      .selected_song
+      .and_then(|index| {
+        self.songs.get(index)
+      })
+      .map(|song| {
+        song.song.meta.beats_per_bar
+      })
+      .filter(|beats| *beats > 0)
+      .unwrap_or(4)
   }
 }
 
@@ -893,14 +2098,15 @@ fn init_tracing(
       file_appender
     );
 
-  let console_layer = fmt::layer()
-    .with_target(true)
-    .with_file(true)
-    .with_line_number(true)
-    .with_thread_ids(true)
-    .with_thread_names(true);
+  let console_layer =
+    tracing_fmt::layer()
+      .with_target(true)
+      .with_file(true)
+      .with_line_number(true)
+      .with_thread_ids(true)
+      .with_thread_names(true);
 
-  let file_layer = fmt::layer()
+  let file_layer = tracing_fmt::layer()
     .with_ansi(false)
     .with_target(true)
     .with_file(true)
@@ -968,6 +2174,189 @@ fn compile_runtime_bindings(
     print_bindings,
     play_song
   })
+}
+
+fn prepare_song(
+  song: &SongFile
+) -> PreparedSong {
+  let beat_seconds =
+    60.0 / song.meta.tempo_bpm.max(1.0);
+
+  let mut expected_notes = Vec::new();
+  let mut prepared_events = Vec::new();
+
+  let mut duration_seconds: f32 = 0.0;
+
+  for event in &song.events {
+    if event.notes.is_empty() {
+      continue;
+    }
+
+    let at_seconds =
+      event.at_beats.max(0.0)
+        * beat_seconds;
+    let duration_seconds_for_event =
+      if event.duration_beats > 0.0 {
+        (event.duration_beats
+          * beat_seconds)
+          .max(0.04)
+      } else {
+        0.32
+      };
+
+    let duration_ms =
+      (duration_seconds_for_event
+        * 1000.0)
+        .round()
+        .max(45.0) as u64;
+
+    let velocity = event
+      .velocity
+      .unwrap_or(
+        song.meta.default_velocity
+      )
+      .clamp(1, 127);
+
+    for midi_note in &event.notes {
+      expected_notes.push(
+        ExpectedNote {
+          at_seconds,
+          midi_note: *midi_note
+        }
+      );
+    }
+
+    duration_seconds = duration_seconds
+      .max(
+        at_seconds
+          + duration_seconds_for_event
+      );
+
+    prepared_events.push(
+      PreparedEvent {
+        at_seconds,
+        duration_seconds:
+          duration_seconds_for_event,
+        duration_ms,
+        velocity,
+        notes: event.notes.clone()
+      }
+    );
+  }
+
+  PreparedSong {
+    events: prepared_events,
+    expected_notes,
+    duration_seconds,
+    beat_seconds
+  }
+}
+
+fn is_white_key(midi_note: u8) -> bool {
+  !is_black_key(midi_note)
+}
+
+fn is_black_key(midi_note: u8) -> bool {
+  matches!(
+    midi_note % 12,
+    1 | 3 | 6 | 8 | 10
+  )
+}
+
+fn black_key_after(
+  white_note: u8
+) -> Option<u8> {
+  match white_note % 12 {
+    | 0 | 2 | 5 | 7 | 9 => {
+      Some(white_note + 1)
+    }
+    | _ => None
+  }
+}
+
+fn white_key_style(
+  active: bool,
+  guided: bool
+) -> container::Style {
+  let mut style =
+    container::Style::default()
+      .background(
+        if active {
+          Color::from_rgb8(255, 180, 95)
+        } else if guided {
+          Color::from_rgb8(
+            255, 242, 204
+          )
+        } else {
+          Color::from_rgb8(
+            245, 245, 245
+          )
+        }
+      )
+      .color(Color::from_rgb8(
+        25, 25, 25
+      ));
+
+  style.border =
+    border::rounded(0).width(1).color(
+      Color::from_rgb8(140, 140, 140)
+    );
+
+  style
+}
+
+fn black_key_style(
+  active: bool,
+  guided: bool
+) -> container::Style {
+  let mut style =
+    container::Style::default()
+      .background(
+        if active {
+          Color::from_rgb8(255, 136, 70)
+        } else if guided {
+          Color::from_rgb8(84, 84, 84)
+        } else {
+          Color::from_rgb8(26, 26, 26)
+        }
+      )
+      .color(Color::from_rgb8(
+        242, 242, 242
+      ));
+
+  style.border =
+    border::rounded(0).width(1).color(
+      Color::from_rgb8(16, 16, 16)
+    );
+
+  style
+}
+
+fn timeline_tile_style(
+  is_current: bool,
+  is_past: bool
+) -> container::Style {
+  let mut style =
+    container::Style::default().color(
+      Color::from_rgb8(20, 20, 20)
+    );
+
+  style.background = Some(
+    if is_current {
+      Color::from_rgb8(255, 212, 138)
+    } else if is_past {
+      Color::from_rgb8(220, 220, 220)
+    } else {
+      Color::from_rgb8(244, 244, 244)
+    }
+    .into()
+  );
+  style.border =
+    border::rounded(6).width(1).color(
+      Color::from_rgb8(160, 160, 160)
+    );
+
+  style
 }
 
 fn midi_note_name(

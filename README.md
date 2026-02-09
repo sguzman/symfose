@@ -22,9 +22,16 @@ Symposium is being built to support:
 
 - desktop GUI app (`iced`)
 - playable keyboard piano in a native window
+- horizontal white/black piano key layout with horizontal scrolling when needed
+- reactive key visuals for physical keypresses and autoplay touches
 - realistic piano synthesis through SoundFont (`SF2`) rendering via `rustysynth`
 - song library loaded from `res/songs/*.toml`
-- song preview playback honoring note timing, tempo, duration, and velocity
+- song key/timing lane rendered above the keyboard (virtual-piano style)
+- three song modes:
+  - `Timer`: metronome + note/timing scoring
+  - `Tutorial`: step-by-step progression with configurable strictness
+  - `Auto Play`: automatic playback with key reactivity
+- live volume slider in GUI (runtime gain adjustment)
 - rich tracing logs to console and rolling files
 
 ## Quick Start
@@ -62,7 +69,7 @@ You can replace the bundled file with any compatible SF2 and adjust bank/preset 
 - Quit: `esc` or `ctrl+c`
 - Next song: `f1`
 - Binding summary hint: `f2`
-- Play selected song preview: `f5`
+- Start selected song mode: `f5`
 
 ## Configuration
 
@@ -83,7 +90,7 @@ Example profile:
 ```toml
 [audio]
 instrument = "piano"
-master_volume = 0.22
+master_volume = 0.68
 note_duration_ms = 680
 release_duration_ms = 720
 sample_rate_hz = 48000
@@ -96,7 +103,7 @@ preset = 0
 channel = 0
 maximum_polyphony = 128
 enable_reverb_and_chorus = true
-instrument_gain_multiplier = 1.0
+instrument_gain_multiplier = 1.35
 ```
 
 ## Song Format

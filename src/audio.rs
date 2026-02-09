@@ -124,8 +124,53 @@ impl AudioEngine {
     })
   }
 
+  pub fn master_volume(&self) -> f32 {
+    self.default_volume
+  }
+
+  pub fn set_master_volume(
+    &mut self,
+    volume: f32
+  ) {
+    let clamped =
+      volume.clamp(0.0, 2.5);
+    self.default_volume = clamped;
+    info!(
+      master_volume = clamped,
+      "master volume updated"
+    );
+  }
+
+  pub fn play_metronome_tick(
+    &mut self,
+    accent: bool
+  ) {
+    let midi_note = if accent {
+      94
+    } else {
+      86
+    };
+    let velocity = if accent {
+      124
+    } else {
+      92
+    };
+    let duration_ms = if accent {
+      115
+    } else {
+      90
+    };
+
+    self
+      .play_note_with_velocity_duration(
+        midi_note,
+        velocity,
+        duration_ms
+      );
+  }
+
   pub fn play_note(
-    &self,
+    &mut self,
     midi_note: u8
   ) {
     self
@@ -137,7 +182,7 @@ impl AudioEngine {
   }
 
   pub fn play_note_with_velocity_duration(
-    &self,
+    &mut self,
     midi_note: u8,
     velocity: u8,
     duration_ms: u64
@@ -182,8 +227,9 @@ impl AudioEngine {
     }
   }
 
+  #[allow(dead_code)]
   pub fn play_song(
-    &self,
+    &mut self,
     song: &SongFile
   ) {
     let sample_rate = self
@@ -411,6 +457,7 @@ fn render_soundfont_note_samples(
   )
 }
 
+#[allow(dead_code)]
 fn render_soundfont_song_samples(
   profile: &LoadedSoundFontProfile,
   song: &SongFile,
@@ -708,6 +755,7 @@ fn ms_to_frames(
   frames.round().max(1.0) as usize
 }
 
+#[allow(dead_code)]
 fn seconds_to_frames(
   seconds: f32,
   sample_rate: u32

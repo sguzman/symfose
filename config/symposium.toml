@@ -7,7 +7,7 @@ directory = "logs"
 
 [audio]
 instrument = "piano"
-master_volume = 0.22
+master_volume = 0.68
 note_duration_ms = 680
 release_duration_ms = 720
 sample_rate_hz = 48000
@@ -20,7 +20,7 @@ preset = 0
 channel = 0
 maximum_polyphony = 128
 enable_reverb_and_chorus = true
-instrument_gain_multiplier = 1.0
+instrument_gain_multiplier = 1.35
 
 [input]
 allow_key_repeat = false
