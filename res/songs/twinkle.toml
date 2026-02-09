@@ -1,0 +1,119 @@
+version = 1
+schema = "res/songs/schema/song.schema.json"
+
+[meta]
+id = "twinkle"
+title = "Twinkle Twinkle Little Star"
+artist = "Traditional"
+composer = "Traditional"
+arranger = "Symposium Starter"
+description = "Beginner melody for keyboard mapping and timing checks."
+difficulty = 1
+tempo_bpm = 96.0
+beats_per_bar = 4
+beat_unit = 4
+key_signature = "C major"
+tags = ["starter", "melody", "practice"]
+source_url = "https://en.wikipedia.org/wiki/Twinkle,_Twinkle,_Little_Star"
+sort_order = 10
+default_velocity = 98
+
+[[sections]]
+id = "phrase_a"
+label = "Phrase A"
+start_beats = 0.0
+end_beats = 8.0
+looped = false
+
+[[sections]]
+id = "phrase_b"
+label = "Phrase B"
+start_beats = 8.0
+end_beats = 16.0
+looped = false
+
+[[events]]
+at_beats = 0.0
+duration_beats = 1.0
+notes = [60]
+hand = "right"
+
+[[events]]
+at_beats = 1.0
+duration_beats = 1.0
+notes = [60]
+hand = "right"
+
+[[events]]
+at_beats = 2.0
+duration_beats = 1.0
+notes = [67]
+hand = "right"
+
+[[events]]
+at_beats = 3.0
+duration_beats = 1.0
+notes = [67]
+hand = "right"
+
+[[events]]
+at_beats = 4.0
+duration_beats = 1.0
+notes = [69]
+hand = "right"
+
+[[events]]
+at_beats = 5.0
+duration_beats = 1.0
+notes = [69]
+hand = "right"
+
+[[events]]
+at_beats = 6.0
+duration_beats = 2.0
+notes = [67]
+hand = "right"
+accent = true
+
+[[events]]
+at_beats = 8.0
+duration_beats = 1.0
+notes = [65]
+hand = "right"
+
+[[events]]
+at_beats = 9.0
+duration_beats = 1.0
+notes = [65]
+hand = "right"
+
+[[events]]
+at_beats = 10.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 11.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 12.0
+duration_beats = 1.0
+notes = [62]
+hand = "right"
+
+[[events]]
+at_beats = 13.0
+duration_beats = 1.0
+notes = [62]
+hand = "right"
+
+[[events]]
+at_beats = 14.0
+duration_beats = 2.0
+notes = [60]
+hand = "right"
+accent = true

@@ -1,5 +1,4 @@
 [app]
-poll_interval_ms = 16
 print_unmapped_keys = false
 
 [logging]
@@ -7,10 +6,10 @@ level = "symposium=debug,info"
 directory = "logs"
 
 [audio]
-master_volume = 0.15
-note_duration_ms = 550
+instrument = "piano_model"
+master_volume = 0.22
+note_duration_ms = 680
 sample_rate_hz = 48000
-waveform = "sine"
 
 [input]
 allow_key_repeat = false
@@ -20,6 +19,11 @@ ignore_shift_for_char_keys = true
 quit = ["esc", "ctrl+c"]
 list_songs = ["f1"]
 print_bindings = ["f2"]
+play_song = ["f5"]
+
+[song_library]
+directory = "res/songs"
+schema_path = "res/songs/schema/song.schema.json"
 
 [keybindings]
 "a" = 60
@@ -39,15 +43,3 @@ print_bindings = ["f2"]
 "l" = 74
 "p" = 75
 ";" = 76
-
-[[songs]]
-id = "twinkle"
-title = "Twinkle Twinkle (Starter)"
-notation = "C C G G A A G | F F E E D D C"
-tempo_bpm = 100
-
-[[songs]]
-id = "ode_to_joy"
-title = "Ode To Joy (Starter)"
-notation = "E E F G | G F E D | C C D E | E D D"
-tempo_bpm = 110

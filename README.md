@@ -1,117 +1,117 @@
 # Symposium
 
-Symposium is a Rust project for building playable virtual instruments with a strong focus on keyboard ergonomics.
+Symposium is a Rust virtual-instrument project focused on playable keyboard piano + song practice with ergonomic mapping.
 
-The long-term target is a Virtual Piano-style experience with:
+It is inspired by browser-based virtual pianos, but extends them with:
 
-- real-time keyboard piano play
-- playable song sheets
-- scoring and timed challenge modes
+- per-song scoring (planned)
+- timed challenge modes (planned)
 - fully configurable keybindings
-- per-song ergonomic keybinding optimization that minimizes finger conflicts and awkward chords
+- ergonomics-aware mapping optimization (planned)
 
-## Current status (MVP)
+## What Works Now
 
-This repo now includes a working terminal piano:
-
-- press mapped keyboard keys to play notes immediately
-- configurable bindings loaded from TOML
-- starter song catalog loaded from TOML
-- control chords for quitting and listing songs/bindings
-- extensive tracing to terminal and rolling log files
+- GUI desktop app using `iced` (winit + wgpu under the hood)
+- keyboard-playable piano in a real window
+- piano-model synthesis (non-sine default)
+- configurable keybindings via TOML
+- song library loaded from `res/songs/*.toml`
+- song preview playback with timing + tempo + velocity
+- tracing logs to console and rolling files in `logs/`
 
 ## Run
 
-1. Install Rust (nightly toolchain is configured by this repo).
-2. Run:
-
 ```bash
-cargo run
+cargo run --release
 ```
 
-By default, config is loaded from `config/symposium.toml`.
-
-You can override config path:
+Config path override:
 
 ```bash
-SYMPOSIUM_CONFIG=path/to/your-config.toml cargo run
+SYMPOSIUM_CONFIG=path/to/config.toml cargo run --release
 ```
 
-## Controls (default)
+## Controls (Default)
 
-- Piano keys: `a w s e d f t g y h u j k o l p ;`
+- Piano: `a w s e d f t g y h u j k o l p ;`
 - Quit: `esc` or `ctrl+c`
-- List songs: `f1`
-- Print active bindings: `f2`
+- Next song: `f1`
+- Binding summary hint: `f2`
+- Play selected song: `f5`
+
+## Project Layout
+
+- `src/main.rs`: GUI app state/update/view and keyboard routing
+- `src/audio.rs`: audio output + piano-model note rendering + song playback scheduling
+- `src/input.rs`: key-chord parsing and runtime chord normalization
+- `src/config.rs`: app config model, defaults, validation, load/create
+- `src/songs.rs`: song file model and loader/validator
+- `config/symposium.toml`: runtime config
+- `res/songs/*.toml`: song data files
+- `res/songs/schema/song.schema.json`: song TOML schema
+
+## Song Format
+
+Songs are separate TOML files under `res/songs/`.
+
+Each song supports:
+
+- metadata (`id`, `title`, `tempo_bpm`, time signature, difficulty, tags, etc.)
+- optional sections (`start_beats`, `end_beats`, looping flags)
+- timed events with beat offsets, durations, chords (`notes = [midi...]`), velocity, and hand metadata
+
+This is rich enough to drive:
+
+- guided playback
+- score/timing evaluation
+- per-song ergonomic optimization
+
+## Song Schema
+
+Schema file:
+
+- `res/songs/schema/song.schema.json`
+
+Taplo config is wired so files in `res/songs/*.toml` validate against this schema.
+
+## Audio
+
+Default instrument is `piano_model`, a physically-inspired synthesized piano voice with:
+
+- fast hammer attack
+- multi-string detune
+- harmonic decay shaping
+- release tail
+
+You can still switch to basic oscillators in config (`sine`, `triangle`, `square`, `sawtooth`) for debugging.
 
 ## Configuration
 
-Main config file: `config/symposium.toml`
+Main config file:
 
-High-value sections:
+- `config/symposium.toml`
 
-- `[audio]`: waveform, note duration, sample rate, master volume
-- `[input]`: repeat handling and shift normalization behavior
-- `[control_bindings]`: runtime control chords
-- `[keybindings]`: key chord -> MIDI note mapping
-- `[[songs]]`: starter song metadata and notation strings
+Important sections:
 
-Example mapping:
-
-```toml
-[keybindings]
-"a" = 60 # C4
-"w" = 61 # C#4
-"s" = 62 # D4
-```
-
-Chord syntax supports modifiers:
-
-- `ctrl+c`
-- `shift+a`
-- `alt+f4`
-- `f1`
-
-## Logging and tracing
-
-Symposium uses `tracing` + `tracing-subscriber` with:
-
-- console logging
-- daily rolling file logs in `logs/`
-
-Default log filter is configured in TOML (`logging.level`) and can be overridden with `RUST_LOG`.
-
-Example:
-
-```bash
-RUST_LOG=symposium=trace cargo run
-```
-
-## Architecture
-
-- `src/main.rs`: runtime orchestration, terminal event loop, control handling
-- `src/config.rs`: TOML model, defaults, load/create, validation
-- `src/input.rs`: key chord parsing + normalized event mapping + binding compilation
-- `src/audio.rs`: low-latency note playback using `rodio`
-
-## Ambition roadmap
-
-1. Move from terminal MVP to GUI piano interface (iced/wgpu) with visible keys and chord highlights.
-2. Add song player/practice views with progress tracking.
-3. Implement score mode (accuracy + timing + combo/streak).
-4. Implement timed challenge mode.
-5. Add per-song binding profiles and one-click profile switching.
-6. Build ergonomic optimizer:
-   - model fingers, hand zones, and stretch limits
-   - minimize same-finger collisions and shift-heavy chords
-   - optimize mapping for each song’s chord/timing graph
-7. Expand from piano to additional virtual instruments.
+- `[audio]`: instrument, sample rate, volume, note duration
+- `[input]`: key repeat and shift behavior
+- `[control_bindings]`: global command chords
+- `[keybindings]`: key chord -> MIDI mapping
+- `[song_library]`: song directory + schema path
 
 ## Development
 
 ```bash
 cargo fmt
 cargo check
+cargo test
 ```
 
-If your terminal/audio backend differs, tune `audio.sample_rate_hz`, `audio.master_volume`, and `audio.note_duration_ms` in `config/symposium.toml`.
+## Roadmap
+
+1. Accurate score engine (timing windows, streaks, accuracy categories)
+2. Timed mode and challenge variants
+3. On-screen sheet + falling note visualizations
+4. Per-song binding profiles
+5. Ergonomic optimizer that reduces same-finger collisions and awkward stretches
+6. SoundFont-backed acoustic instruments

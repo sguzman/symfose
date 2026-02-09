@@ -26,7 +26,7 @@ pub struct AppConfig {
   pub input:            InputConfig,
   pub control_bindings: ControlBindings,
   pub keybindings: BTreeMap<String, u8>,
-  pub songs:            Vec<SongConfig>
+  pub song_library: SongLibraryConfig
 }
 
 impl Default for AppConfig {
@@ -44,7 +44,8 @@ impl Default for AppConfig {
         ControlBindings::default(),
       keybindings:
         default_keybindings(),
-      songs:            default_songs()
+      song_library:
+        SongLibraryConfig::default()
     }
   }
 }
@@ -54,14 +55,12 @@ impl Default for AppConfig {
 )]
 #[serde(default)]
 pub struct AppSection {
-  pub poll_interval_ms:    u64,
   pub print_unmapped_keys: bool
 }
 
 impl Default for AppSection {
   fn default() -> Self {
     Self {
-      poll_interval_ms:    16,
       print_unmapped_keys: false
     }
   }
@@ -109,19 +108,20 @@ impl Default for InputConfig {
 )]
 #[serde(default)]
 pub struct AudioConfig {
+  pub instrument:       Instrument,
   pub master_volume:    f32,
   pub note_duration_ms: u64,
-  pub sample_rate_hz:   u32,
-  pub waveform:         Waveform
+  pub sample_rate_hz:   u32
 }
 
 impl Default for AudioConfig {
   fn default() -> Self {
     Self {
-      master_volume:    0.15,
-      note_duration_ms: 550,
-      sample_rate_hz:   48_000,
-      waveform:         Waveform::Sine
+      instrument:
+        Instrument::PianoModel,
+      master_volume:    0.22,
+      note_duration_ms: 680,
+      sample_rate_hz:   48_000
     }
   }
 }
@@ -135,8 +135,9 @@ impl Default for AudioConfig {
   Default,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum Waveform {
+pub enum Instrument {
   #[default]
+  PianoModel,
   Sine,
   Triangle,
   Square,
@@ -150,7 +151,8 @@ pub enum Waveform {
 pub struct ControlBindings {
   pub quit:           Vec<String>,
   pub list_songs:     Vec<String>,
-  pub print_bindings: Vec<String>
+  pub print_bindings: Vec<String>,
+  pub play_song:      Vec<String>
 }
 
 impl Default for ControlBindings {
@@ -165,6 +167,9 @@ impl Default for ControlBindings {
       ],
       print_bindings: vec![
         "f2".to_string(),
+      ],
+      play_song:      vec![
+        "f5".to_string(),
       ]
     }
   }
@@ -174,21 +179,19 @@ impl Default for ControlBindings {
   Debug, Clone, Serialize, Deserialize,
 )]
 #[serde(default)]
-pub struct SongConfig {
-  pub id:        String,
-  pub title:     String,
-  pub notation:  String,
-  pub tempo_bpm: u16
+pub struct SongLibraryConfig {
+  pub directory:   String,
+  pub schema_path: String
 }
 
-impl Default for SongConfig {
+impl Default for SongLibraryConfig {
   fn default() -> Self {
     Self {
-      id:        "untitled".to_string(),
-      title:     "Untitled Song"
+      directory:   "res/songs"
         .to_string(),
-      notation:  String::new(),
-      tempo_bpm: 120
+      schema_path: "res/songs/schema/\
+                    song.schema.json"
+        .to_string()
     }
   }
 }
@@ -210,6 +213,7 @@ pub fn load_or_create(
           path.display()
         )
       })?;
+
   let config: AppConfig =
     toml::from_str(&content)
       .with_context(|| {
@@ -218,6 +222,7 @@ pub fn load_or_create(
           path.display()
         )
       })?;
+
   validate_config(&config)?;
   Ok(config)
 }
@@ -249,6 +254,7 @@ pub fn write_default(
         path.display()
       )
     })?;
+
   Ok(())
 }
 
@@ -263,6 +269,7 @@ fn validate_config(
        between 0.0 and 1.0"
     );
   }
+
   if config.audio.note_duration_ms == 0
   {
     bail!(
@@ -270,25 +277,52 @@ fn validate_config(
        > 0"
     );
   }
+
   if config.audio.sample_rate_hz < 8_000
   {
     bail!(
       "audio.sample_rate_hz must be \
-       at least 8000"
+       >= 8000"
     );
   }
+
   if config.keybindings.is_empty() {
     bail!(
       "keybindings must define at \
        least one mapping"
     );
   }
+
   if config.keybindings.iter().any(
     |(_, midi_note)| *midi_note > 127
   ) {
     bail!(
       "all keybindings must map to \
        MIDI notes in range 0..=127"
+    );
+  }
+
+  if config
+    .song_library
+    .directory
+    .trim()
+    .is_empty()
+  {
+    bail!(
+      "song_library.directory cannot \
+       be empty"
+    );
+  }
+
+  if config
+    .song_library
+    .schema_path
+    .trim()
+    .is_empty()
+  {
+    bail!(
+      "song_library.schema_path \
+       cannot be empty"
     );
   }
 
@@ -318,29 +352,4 @@ fn default_keybindings()
   map.insert(";".to_string(), 76);
 
   map
-}
-
-fn default_songs() -> Vec<SongConfig> {
-  vec![
-    SongConfig {
-      id:        "twinkle".to_string(),
-      title:     "Twinkle Twinkle \
-                  (Starter)"
-        .to_string(),
-      notation:  "C C G G A A G | F F \
-                  E E D D C"
-        .to_string(),
-      tempo_bpm: 100
-    },
-    SongConfig {
-      id:        "ode_to_joy"
-        .to_string(),
-      title:     "Ode To Joy (Starter)"
-        .to_string(),
-      notation:  "E E F G | G F E D | \
-                  C C D E | E D D"
-        .to_string(),
-      tempo_bpm: 110
-    },
-  ]
 }

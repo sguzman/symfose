@@ -5,7 +5,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.101"
-crossterm = "0.29.0"
+iced = "0.14.0"
 rodio = "0.21.1"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.11"

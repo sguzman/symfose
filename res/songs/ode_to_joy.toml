@@ -1,0 +1,117 @@
+version = 1
+schema = "res/songs/schema/song.schema.json"
+
+[meta]
+id = "ode_to_joy"
+title = "Ode to Joy"
+artist = "Ludwig van Beethoven"
+composer = "Ludwig van Beethoven"
+arranger = "Symposium Starter"
+description = "Short phrase adapted for beginner keyboard practice."
+difficulty = 2
+tempo_bpm = 112.0
+beats_per_bar = 4
+beat_unit = 4
+key_signature = "C major"
+tags = ["starter", "classical", "melody"]
+source_url = "https://en.wikipedia.org/wiki/Ode_to_Joy"
+sort_order = 20
+default_velocity = 96
+
+[[sections]]
+id = "theme_a"
+label = "Theme A"
+start_beats = 0.0
+end_beats = 16.0
+looped = false
+
+[[events]]
+at_beats = 0.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 1.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 2.0
+duration_beats = 1.0
+notes = [65]
+hand = "right"
+
+[[events]]
+at_beats = 3.0
+duration_beats = 1.0
+notes = [67]
+hand = "right"
+
+[[events]]
+at_beats = 4.0
+duration_beats = 1.0
+notes = [67]
+hand = "right"
+
+[[events]]
+at_beats = 5.0
+duration_beats = 1.0
+notes = [65]
+hand = "right"
+
+[[events]]
+at_beats = 6.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 7.0
+duration_beats = 1.0
+notes = [62]
+hand = "right"
+
+[[events]]
+at_beats = 8.0
+duration_beats = 1.0
+notes = [60]
+hand = "right"
+
+[[events]]
+at_beats = 9.0
+duration_beats = 1.0
+notes = [60]
+hand = "right"
+
+[[events]]
+at_beats = 10.0
+duration_beats = 1.0
+notes = [62]
+hand = "right"
+
+[[events]]
+at_beats = 11.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 12.0
+duration_beats = 1.0
+notes = [64]
+hand = "right"
+
+[[events]]
+at_beats = 13.0
+duration_beats = 1.0
+notes = [62]
+hand = "right"
+
+[[events]]
+at_beats = 14.0
+duration_beats = 2.0
+notes = [62]
+hand = "right"
+accent = true

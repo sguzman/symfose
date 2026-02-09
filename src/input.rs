@@ -14,63 +14,71 @@ use anyhow::{
   Result,
   bail
 };
-use crossterm::event::{
-  KeyCode,
-  KeyEvent,
-  KeyModifiers
+use iced::keyboard::key::Named;
+use iced::keyboard::{
+  self,
+  Key
 };
 
 #[derive(
   Debug,
   Clone,
   Copy,
+  Default,
   PartialEq,
   Eq,
   Hash,
 )]
+pub struct KeyModifiers {
+  pub ctrl:  bool,
+  pub alt:   bool,
+  pub logo:  bool,
+  pub shift: bool
+}
+
+impl KeyModifiers {
+  pub fn from_iced(
+    modifiers: keyboard::Modifiers
+  ) -> Self {
+    Self {
+      ctrl:  modifiers.control(),
+      alt:   modifiers.alt(),
+      logo:  modifiers.logo(),
+      shift: modifiers.shift()
+    }
+  }
+}
+
+#[derive(
+  Debug, Clone, PartialEq, Eq, Hash,
+)]
 pub struct KeyChord {
-  pub code:      KeyCode,
+  pub key:       String,
   pub modifiers: KeyModifiers
 }
 
 impl KeyChord {
-  pub fn from_event(
-    event: KeyEvent,
+  pub fn from_key_event(
+    key: &Key,
+    modifiers: keyboard::Modifiers,
     ignore_shift_for_char_keys: bool
   ) -> Option<Self> {
-    if matches!(
-      event.code,
-      KeyCode::Modifier(_)
-    ) {
-      return None;
-    }
+    let (token, is_char_key) =
+      key_to_token_from_event(key)?;
 
-    let mut code = event.code;
-    let mut modifiers = event.modifiers;
-
-    if let KeyCode::Char(character) =
-      code
-    {
-      let normalized =
-        character.to_ascii_lowercase();
-      code = KeyCode::Char(normalized);
-
-      if ignore_shift_for_char_keys {
+    let mut normalized_mods =
+      KeyModifiers::from_iced(
         modifiers
-          .remove(KeyModifiers::SHIFT);
-      }
+      );
+    if ignore_shift_for_char_keys
+      && is_char_key
+    {
+      normalized_mods.shift = false;
     }
-
-    let allowed_modifiers =
-      KeyModifiers::SHIFT
-        | KeyModifiers::CONTROL
-        | KeyModifiers::ALT
-        | KeyModifiers::SUPER;
 
     Some(Self {
-      code,
-      modifiers: modifiers
-        & allowed_modifiers
+      key:       token,
+      modifiers: normalized_mods
     })
   }
 }
@@ -82,33 +90,21 @@ impl Display for KeyChord {
   ) -> fmt::Result {
     let mut parts = Vec::new();
 
-    if self
-      .modifiers
-      .contains(KeyModifiers::CONTROL)
-    {
+    if self.modifiers.ctrl {
       parts.push("ctrl".to_string());
     }
-    if self
-      .modifiers
-      .contains(KeyModifiers::ALT)
-    {
+    if self.modifiers.alt {
       parts.push("alt".to_string());
     }
-    if self
-      .modifiers
-      .contains(KeyModifiers::SUPER)
-    {
+    if self.modifiers.logo {
       parts.push("super".to_string());
     }
-    if self
-      .modifiers
-      .contains(KeyModifiers::SHIFT)
-    {
+    if self.modifiers.shift {
       parts.push("shift".to_string());
     }
 
-    parts
-      .push(key_code_label(self.code));
+    parts.push(self.key.clone());
+
     write!(f, "{}", parts.join("+"))
   }
 }
@@ -135,13 +131,17 @@ pub fn compile_note_bindings(
            {chord_spec}"
         )
       })?;
+
     if let Some(existing_note) =
-      compiled.insert(chord, *midi_note)
+      compiled.insert(
+        chord.clone(),
+        *midi_note
+      )
     {
       bail!(
         "duplicate keybinding {chord} \
          (MIDI {existing_note} and \
-         MIDI {midi_note})",
+         MIDI {midi_note})"
       );
     }
   }
@@ -173,8 +173,8 @@ pub fn parse_chord(
   spec: &str
 ) -> Result<KeyChord> {
   let mut modifiers =
-    KeyModifiers::empty();
-  let mut key_code: Option<KeyCode> =
+    KeyModifiers::default();
+  let mut key_token: Option<String> =
     None;
 
   for token in spec
@@ -182,142 +182,122 @@ pub fn parse_chord(
     .map(str::trim)
     .filter(|token| !token.is_empty())
   {
-    let token_lower =
+    let lowered =
       token.to_ascii_lowercase();
 
-    match token_lower.as_str() {
+    match lowered.as_str() {
       | "ctrl" | "control" => {
-        modifiers
-          .insert(KeyModifiers::CONTROL)
+        modifiers.ctrl = true
       }
       | "alt" | "option" => {
-        modifiers
-          .insert(KeyModifiers::ALT)
-      }
-      | "shift" => {
-        modifiers
-          .insert(KeyModifiers::SHIFT)
+        modifiers.alt = true
       }
       | "super" | "meta" | "cmd"
       | "command" | "win"
       | "windows" => {
-        modifiers
-          .insert(KeyModifiers::SUPER)
+        modifiers.logo = true
+      }
+      | "shift" => {
+        modifiers.shift = true
       }
       | _ => {
-        if key_code.is_some() {
+        if key_token.is_some() {
           bail!(
             "multiple non-modifier \
              keys in chord '{spec}'"
           );
         }
-        key_code =
-          Some(parse_key(token)?);
+
+        key_token = Some(
+          parse_key_token(&lowered)?
+        );
       }
     }
   }
 
-  let code =
-    key_code.with_context(|| {
+  let key =
+    key_token.with_context(|| {
       format!(
         "missing key in chord '{spec}'"
       )
     })?;
 
   Ok(KeyChord {
-    code,
+    key,
     modifiers
   })
 }
 
-fn parse_key(
+fn parse_key_token(
   token: &str
-) -> Result<KeyCode> {
-  let token = token.trim();
-  let token_lower =
-    token.to_ascii_lowercase();
-
-  let key_code = match token_lower
-    .as_str()
-  {
-    | "esc" | "escape" => KeyCode::Esc,
-    | "enter" | "return" => {
-      KeyCode::Enter
+) -> Result<String> {
+  let normalized = match token {
+    | "esc" | "escape" => {
+      "esc".to_string()
     }
-    | "tab" => KeyCode::Tab,
-    | "backtab" => KeyCode::BackTab,
-    | "backspace" => KeyCode::Backspace,
-    | "space" => KeyCode::Char(' '),
-    | "left" => KeyCode::Left,
-    | "right" => KeyCode::Right,
-    | "up" => KeyCode::Up,
-    | "down" => KeyCode::Down,
-    | "home" => KeyCode::Home,
-    | "end" => KeyCode::End,
-    | "pageup" => KeyCode::PageUp,
-    | "pagedown" => KeyCode::PageDown,
+    | "enter" | "return" => {
+      "enter".to_string()
+    }
+    | "tab" => "tab".to_string(),
+    | "backtab" => {
+      "backtab".to_string()
+    }
+    | "backspace" => {
+      "backspace".to_string()
+    }
+    | "space" => "space".to_string(),
+    | "left" => "left".to_string(),
+    | "right" => "right".to_string(),
+    | "up" => "up".to_string(),
+    | "down" => "down".to_string(),
+    | "home" => "home".to_string(),
+    | "end" => "end".to_string(),
+    | "pageup" => "pageup".to_string(),
+    | "pagedown" => {
+      "pagedown".to_string()
+    }
     | "delete" | "del" => {
-      KeyCode::Delete
+      "delete".to_string()
     }
     | "insert" | "ins" => {
-      KeyCode::Insert
+      "insert".to_string()
     }
-    | "comma" => KeyCode::Char(','),
+    | "comma" => ",".to_string(),
     | "period" | "dot" => {
-      KeyCode::Char('.')
+      ".".to_string()
     }
-    | "slash" => KeyCode::Char('/'),
-    | "semicolon" => KeyCode::Char(';'),
+    | "slash" => "/".to_string(),
+    | "semicolon" => ";".to_string(),
     | "apostrophe" | "quote" => {
-      KeyCode::Char('\'')
+      "'".to_string()
     }
-    | "minus" => KeyCode::Char('-'),
-    | "equals" => KeyCode::Char('='),
+    | "minus" => "-".to_string(),
+    | "equals" => "=".to_string(),
     | "left_bracket" | "lbracket" => {
-      KeyCode::Char('[')
+      "[".to_string()
     }
     | "right_bracket" | "rbracket" => {
-      KeyCode::Char(']')
+      "]".to_string()
     }
-    | "backslash" => {
-      KeyCode::Char('\\')
-    }
+    | "backslash" => "\\".to_string(),
     | "grave" | "backtick" => {
-      KeyCode::Char('`')
+      "`".to_string()
     }
-    | "plus" => KeyCode::Char('+'),
+    | "plus" => "+".to_string(),
     | _ => {
-      if token_lower.starts_with('f')
-        && token_lower.len() > 1
+      if let Some(f_key) =
+        parse_function_key_token(token)?
       {
-        let function_number =
-          &token_lower[1..];
-        let n = function_number
-          .parse::<u8>()
-          .with_context(|| {
-            format!(
-              "invalid function key \
-               '{token}'"
-            )
-          })?;
-        if n == 0 {
-          bail!(
-            "function key numbers \
-             start at 1: '{token}'"
-          );
-        }
-        KeyCode::F(n)
+        f_key
       } else {
         let mut chars = token.chars();
         match (
           chars.next(),
           chars.next()
         ) {
-          | (Some(character), None) => {
-            KeyCode::Char(
-              character
-                .to_ascii_lowercase()
-            )
+          | (Some(ch), None) => {
+            ch.to_ascii_lowercase()
+              .to_string()
           }
           | _ => {
             bail!(
@@ -330,131 +310,194 @@ fn parse_key(
     }
   };
 
-  Ok(key_code)
+  Ok(normalized)
 }
 
-fn key_code_label(
-  key_code: KeyCode
-) -> String {
-  match key_code {
-    | KeyCode::Backspace => {
-      "backspace".to_string()
+fn parse_function_key_token(
+  token: &str
+) -> Result<Option<String>> {
+  if !(token.starts_with('f')
+    && token.len() > 1)
+  {
+    return Ok(None);
+  }
+
+  let n = token[1..]
+    .parse::<u8>()
+    .with_context(|| {
+      format!(
+        "invalid function key \
+         '{token}'"
+      )
+    })?;
+
+  if !(1..=24).contains(&n) {
+    bail!(
+      "function key must be in range \
+       f1..f24: '{token}'"
+    );
+  }
+
+  Ok(Some(format!("f{n}")))
+}
+
+fn key_to_token_from_event(
+  key: &Key
+) -> Option<(String, bool)> {
+  match key.as_ref() {
+    | Key::Character(text) => {
+      let mut chars = text.chars();
+      let first = chars.next()?;
+
+      if chars.next().is_some() {
+        return Some((
+          text.to_ascii_lowercase(),
+          false
+        ));
+      }
+
+      if first == ' ' {
+        return Some((
+          "space".to_string(),
+          false
+        ));
+      }
+
+      Some((
+        first
+          .to_ascii_lowercase()
+          .to_string(),
+        true
+      ))
     }
-    | KeyCode::Enter => {
-      "enter".to_string()
+    | Key::Named(named) => {
+      named_key_to_token(named)
+        .map(|token| (token, false))
     }
-    | KeyCode::Left => {
-      "left".to_string()
+    | Key::Unidentified => None
+  }
+}
+
+fn named_key_to_token(
+  named: Named
+) -> Option<String> {
+  match named {
+    | Named::Escape => {
+      Some("esc".to_string())
     }
-    | KeyCode::Right => {
-      "right".to_string()
+    | Named::Enter => {
+      Some("enter".to_string())
     }
-    | KeyCode::Up => "up".to_string(),
-    | KeyCode::Down => {
-      "down".to_string()
+    | Named::Tab => {
+      Some("tab".to_string())
     }
-    | KeyCode::Home => {
-      "home".to_string()
+    | Named::Backspace => {
+      Some("backspace".to_string())
     }
-    | KeyCode::End => "end".to_string(),
-    | KeyCode::PageUp => {
-      "pageup".to_string()
+    | Named::Space => {
+      Some("space".to_string())
     }
-    | KeyCode::PageDown => {
-      "pagedown".to_string()
+    | Named::ArrowLeft => {
+      Some("left".to_string())
     }
-    | KeyCode::Tab => "tab".to_string(),
-    | KeyCode::BackTab => {
-      "backtab".to_string()
+    | Named::ArrowRight => {
+      Some("right".to_string())
     }
-    | KeyCode::Delete => {
-      "delete".to_string()
+    | Named::ArrowUp => {
+      Some("up".to_string())
     }
-    | KeyCode::Insert => {
-      "insert".to_string()
+    | Named::ArrowDown => {
+      Some("down".to_string())
     }
-    | KeyCode::F(n) => format!("f{n}"),
-    | KeyCode::Char(character) => {
-      character.to_string()
+    | Named::Home => {
+      Some("home".to_string())
     }
-    | KeyCode::Null => {
-      "null".to_string()
+    | Named::End => {
+      Some("end".to_string())
     }
-    | KeyCode::Esc => "esc".to_string(),
-    | KeyCode::CapsLock => {
-      "caps_lock".to_string()
+    | Named::PageUp => {
+      Some("pageup".to_string())
     }
-    | KeyCode::ScrollLock => {
-      "scroll_lock".to_string()
+    | Named::PageDown => {
+      Some("pagedown".to_string())
     }
-    | KeyCode::NumLock => {
-      "num_lock".to_string()
+    | Named::Delete => {
+      Some("delete".to_string())
     }
-    | KeyCode::PrintScreen => {
-      "print_screen".to_string()
+    | Named::Insert => {
+      Some("insert".to_string())
     }
-    | KeyCode::Pause => {
-      "pause".to_string()
+    | _ => {
+      named_function_key(named)
+        .map(|n| format!("f{n}"))
     }
-    | KeyCode::Menu => {
-      "menu".to_string()
-    }
-    | KeyCode::KeypadBegin => {
-      "keypad_begin".to_string()
-    }
-    | KeyCode::Media(media) => {
-      format!("media:{media:?}")
-    }
-    | KeyCode::Modifier(modifier) => {
-      format!("modifier:{modifier:?}")
-    }
+  }
+}
+
+fn named_function_key(
+  named: Named
+) -> Option<u8> {
+  match named {
+    | Named::F1 => Some(1),
+    | Named::F2 => Some(2),
+    | Named::F3 => Some(3),
+    | Named::F4 => Some(4),
+    | Named::F5 => Some(5),
+    | Named::F6 => Some(6),
+    | Named::F7 => Some(7),
+    | Named::F8 => Some(8),
+    | Named::F9 => Some(9),
+    | Named::F10 => Some(10),
+    | Named::F11 => Some(11),
+    | Named::F12 => Some(12),
+    | Named::F13 => Some(13),
+    | Named::F14 => Some(14),
+    | Named::F15 => Some(15),
+    | Named::F16 => Some(16),
+    | Named::F17 => Some(17),
+    | Named::F18 => Some(18),
+    | Named::F19 => Some(19),
+    | Named::F20 => Some(20),
+    | Named::F21 => Some(21),
+    | Named::F22 => Some(22),
+    | Named::F23 => Some(23),
+    | Named::F24 => Some(24),
+    | _ => None
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use crossterm::event::KeyEvent;
-
   use super::*;
 
   #[test]
   fn parses_function_key() {
     let chord =
       parse_chord("f1").unwrap();
-    assert_eq!(
-      chord.code,
-      KeyCode::F(1)
-    );
+    assert_eq!(chord.key, "f1");
   }
 
   #[test]
   fn parses_plain_f_as_character() {
     let chord =
       parse_chord("f").unwrap();
-    assert_eq!(
-      chord.code,
-      KeyCode::Char('f')
-    );
+    assert_eq!(chord.key, "f");
   }
 
   #[test]
-  fn normalizes_shifted_char_when_requested()
+  fn normalizes_shifted_character_when_configured()
    {
-    let event = KeyEvent::new(
-      KeyCode::Char('A'),
-      KeyModifiers::SHIFT
-    );
+    let key =
+      Key::Character("A".into());
     let chord =
-      KeyChord::from_event(event, true)
-        .unwrap();
+      KeyChord::from_key_event(
+        &key,
+        keyboard::Modifiers::SHIFT,
+        true
+      )
+      .expect("chord expected");
 
-    assert_eq!(
-      chord.code,
-      KeyCode::Char('a')
-    );
-    assert_eq!(
-      chord.modifiers,
-      KeyModifiers::empty()
-    );
+    assert_eq!(chord.key, "a");
+    assert!(!chord.modifiers.shift);
   }
 }

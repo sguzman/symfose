@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://symposium.local/schema/song.schema.json",
+  "title": "Symposium Song",
+  "description": "Schema for song arrangement files used by Symposium.",
+  "type": "object",
+  "required": ["version", "meta", "events"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "schema": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "tempo_bpm",
+        "beats_per_bar",
+        "beat_unit",
+        "default_velocity"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artist": {
+          "type": "string"
+        },
+        "composer": {
+          "type": "string"
+        },
+        "arranger": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "tempo_bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "beats_per_bar": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "beat_unit": {
+          "type": "integer",
+          "enum": [1, 2, 4, 8, 16, 32]
+        },
+        "key_signature": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "sort_order": {
+          "type": "integer"
+        },
+        "default_velocity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 127
+        }
+      },
+      "additionalProperties": false
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "start_beats", "end_beats", "looped"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string"
+          },
+          "start_beats": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_beats": {
+            "type": "number",
+            "minimum": 0
+          },
+          "looped": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["at_beats", "duration_beats", "notes"],
+        "properties": {
+          "at_beats": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration_beats": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "notes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 127
+            }
+          },
+          "velocity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 127
+          },
+          "hand": {
+            "type": "string",
+            "enum": ["left", "right", "both"]
+          },
+          "lyric": {
+            "type": "string"
+          },
+          "accent": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

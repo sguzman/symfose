@@ -79,3 +79,9 @@ include = [
   "crates/tui/res/config.toml",
 ]
 schema = { path = "crates/tui/res/schemas/tui.schema.json" }
+
+[[rule]]
+include = [
+  "res/songs/*.toml",
+]
+schema = { path = "res/songs/schema/song.schema.json" }
