@@ -1,103 +1,138 @@
 # Symposium
 
-Symposium is a Rust virtual-instrument project focused on playable keyboard piano + song practice with ergonomic mapping.
+Symposium is a Rust desktop app for playing virtual instruments from your keyboard, starting with piano.
 
-It is inspired by browser-based virtual pianos, but extends them with:
+It is inspired by browser virtual pianos, but aimed at structured practice and performance scoring.
 
-- per-song scoring (planned)
-- timed challenge modes (planned)
-- fully configurable keybindings
-- ergonomics-aware mapping optimization (planned)
+## Project Ambition
 
-## What Works Now
+Symposium is being built to support:
 
-- GUI desktop app using `iced` (winit + wgpu under the hood)
-- keyboard-playable piano in a real window
-- piano-model synthesis (non-sine default)
-- configurable keybindings via TOML
+- real-time instrument play from configurable keyboard mappings
+- playable song charts with tempo-aware timing
+- score mode (accuracy + streak + grading)
+- timed/challenge modes
+- ergonomic mapping optimization per song:
+  - avoids same-finger conflicts
+  - minimizes awkward reaches
+  - supports multi-key chords without relying on shift-heavy combos
+- instrument profiles so multiple instruments can be added later without changing core gameplay
+
+## What Works Today
+
+- desktop GUI app (`iced`)
+- playable keyboard piano in a native window
+- realistic piano synthesis through SoundFont (`SF2`) rendering via `rustysynth`
 - song library loaded from `res/songs/*.toml`
-- song preview playback with timing + tempo + velocity
-- tracing logs to console and rolling files in `logs/`
+- song preview playback honoring note timing, tempo, duration, and velocity
+- rich tracing logs to console and rolling files
 
-## Run
+## Quick Start
 
 ```bash
 cargo run --release
 ```
 
-Config path override:
+To use a custom config:
 
 ```bash
-SYMPOSIUM_CONFIG=path/to/config.toml cargo run --release
+SYMPOSIUM_CONFIG=path/to/symposium.toml cargo run --release
 ```
+
+## SoundFont Setup
+
+Bundled by default:
+
+- `res/soundfonts/piano.sf2`
+- license/attribution: `res/soundfonts/piano.sf2.LICENSE`
+
+If this file is missing, Symposium tries common Linux paths:
+
+- `/usr/share/sounds/sf2/FluidR3_GM.sf2`
+- `/usr/share/sounds/sf2/TimGM6mb.sf2`
+- `/usr/share/sounds/sf2/default-GM.sf2`
+- `/usr/share/soundfonts/FluidR3_GM.sf2`
+- `/usr/share/sf2/FluidR3_GM.sf2`
+
+You can replace the bundled file with any compatible SF2 and adjust bank/preset in config.
 
 ## Controls (Default)
 
-- Piano: `a w s e d f t g y h u j k o l p ;`
+- Piano notes: `a w s e d f t g y h u j k o l p ;`
 - Quit: `esc` or `ctrl+c`
 - Next song: `f1`
 - Binding summary hint: `f2`
-- Play selected song: `f5`
-
-## Project Layout
-
-- `src/main.rs`: GUI app state/update/view and keyboard routing
-- `src/audio.rs`: audio output + piano-model note rendering + song playback scheduling
-- `src/input.rs`: key-chord parsing and runtime chord normalization
-- `src/config.rs`: app config model, defaults, validation, load/create
-- `src/songs.rs`: song file model and loader/validator
-- `config/symposium.toml`: runtime config
-- `res/songs/*.toml`: song data files
-- `res/songs/schema/song.schema.json`: song TOML schema
-
-## Song Format
-
-Songs are separate TOML files under `res/songs/`.
-
-Each song supports:
-
-- metadata (`id`, `title`, `tempo_bpm`, time signature, difficulty, tags, etc.)
-- optional sections (`start_beats`, `end_beats`, looping flags)
-- timed events with beat offsets, durations, chords (`notes = [midi...]`), velocity, and hand metadata
-
-This is rich enough to drive:
-
-- guided playback
-- score/timing evaluation
-- per-song ergonomic optimization
-
-## Song Schema
-
-Schema file:
-
-- `res/songs/schema/song.schema.json`
-
-Taplo config is wired so files in `res/songs/*.toml` validate against this schema.
-
-## Audio
-
-Default instrument is `piano_model`, a physically-inspired synthesized piano voice with:
-
-- fast hammer attack
-- multi-string detune
-- harmonic decay shaping
-- release tail
-
-You can still switch to basic oscillators in config (`sine`, `triangle`, `square`, `sawtooth`) for debugging.
+- Play selected song preview: `f5`
 
 ## Configuration
 
-Main config file:
+Main runtime config:
 
 - `config/symposium.toml`
 
-Important sections:
+Key audio settings:
 
-- `[audio]`: instrument, sample rate, volume, note duration
-- `[input]`: key repeat and shift behavior
-- `[control_bindings]`: global command chords
-- `[keybindings]`: key chord -> MIDI mapping
-- `[song_library]`: song directory + schema path
+- `audio.instrument`: active profile key
+- `audio.master_volume`: global output gain
+- `audio.note_duration_ms`: default keypress hold length
+- `audio.release_duration_ms`: release tail rendered after note-off
+- `audio.instrument_profiles.<name>`: per-instrument profile
+
+Example profile:
+
+```toml
+[audio]
+instrument = "piano"
+master_volume = 0.22
+note_duration_ms = 680
+release_duration_ms = 720
+sample_rate_hz = 48000
+
+[audio.instrument_profiles.piano]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 0
+channel = 0
+maximum_polyphony = 128
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.0
+```
+
+## Song Format
+
+Songs are TOML files in `res/songs/` with schema validation from:
+
+- `res/songs/schema/song.schema.json`
+
+Song files include:
+
+- metadata (`id`, `title`, `artist`, `tempo_bpm`, difficulty, tags, etc.)
+- sections (`start_beats`, `end_beats`, loop flags)
+- timed events with:
+  - `at_beats`
+  - `duration_beats`
+  - `notes` (MIDI note list/chords)
+  - optional `velocity`
+  - optional hand metadata/lyrics/accent flags
+
+## Repository Layout
+
+- `src/main.rs`: GUI state/update/view and keyboard routing
+- `src/audio.rs`: SoundFont rendering + playback scheduling
+- `src/input.rs`: key chord parsing and normalized bindings
+- `src/config.rs`: config model, defaults, validation, load/create
+- `src/songs.rs`: song model + loader/validator
+- `config/symposium.toml`: runtime configuration
+- `res/songs/`: song data + schema
+- `res/soundfonts/`: local SoundFont assets
+
+## Logging
+
+Tracing is enabled throughout startup, input handling, audio rendering, and song playback.
+
+- console logs: live run diagnostics
+- file logs: `logs/` (rolling appender)
 
 ## Development
 
@@ -109,9 +144,9 @@ cargo test
 
 ## Roadmap
 
-1. Accurate score engine (timing windows, streaks, accuracy categories)
-2. Timed mode and challenge variants
-3. On-screen sheet + falling note visualizations
-4. Per-song binding profiles
-5. Ergonomic optimizer that reduces same-finger collisions and awkward stretches
-6. SoundFont-backed acoustic instruments
+1. Score engine with timing windows and per-note grading
+2. Timed challenge mode and fail/pass logic
+3. Song playback overlays (guide notes / visual timeline)
+4. Per-song instrument + binding presets
+5. Ergonomic optimizer that auto-generates chord-friendly mappings
+6. Additional instruments (strings, pads, synths) through profile expansion

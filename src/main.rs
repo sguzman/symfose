@@ -453,8 +453,8 @@ fn view(
       text(
         "Keyboard-driven piano with \
          configurable bindings, song \
-         library, and piano-model \
-         synthesis."
+         library, and realistic \
+         SoundFont synthesis."
       )
       .size(16),
       text(&app.startup_notice)
@@ -628,8 +628,11 @@ fn piano_panel(
     column![
       text("Piano").size(22),
       text(format!(
-        "Instrument: {:?}",
-        app.config.audio.instrument
+        "Instrument: {}",
+        app
+          .config
+          .audio
+          .active_profile_summary()
       )),
       text(format!(
         "Active notes: {active_line}"

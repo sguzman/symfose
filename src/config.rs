@@ -108,40 +108,121 @@ impl Default for InputConfig {
 )]
 #[serde(default)]
 pub struct AudioConfig {
-  pub instrument:       Instrument,
-  pub master_volume:    f32,
-  pub note_duration_ms: u64,
-  pub sample_rate_hz:   u32
+  pub instrument:          String,
+  pub master_volume:       f32,
+  pub note_duration_ms:    u64,
+  pub release_duration_ms: u64,
+  pub sample_rate_hz:      u32,
+  pub instrument_profiles:
+    BTreeMap<String, InstrumentProfile>
 }
 
 impl Default for AudioConfig {
   fn default() -> Self {
     Self {
-      instrument:
-        Instrument::PianoModel,
-      master_volume:    0.22,
-      note_duration_ms: 680,
-      sample_rate_hz:   48_000
+      instrument:          "piano"
+        .to_string(),
+      master_volume:       0.22,
+      note_duration_ms:    680,
+      release_duration_ms: 720,
+      sample_rate_hz:      48_000,
+      instrument_profiles:
+        default_instrument_profiles()
     }
   }
 }
 
 #[derive(
-  Debug,
-  Clone,
-  Copy,
-  Serialize,
-  Deserialize,
-  Default,
+  Debug, Clone, Serialize, Deserialize,
 )]
-#[serde(rename_all = "snake_case")]
-pub enum Instrument {
-  #[default]
-  PianoModel,
-  Sine,
-  Triangle,
-  Square,
-  Sawtooth
+#[serde(
+  tag = "engine",
+  rename_all = "snake_case"
+)]
+pub enum InstrumentProfile {
+  Soundfont(SoundFontProfile)
+}
+
+impl Default for InstrumentProfile {
+  fn default() -> Self {
+    Self::Soundfont(
+      SoundFontProfile::default()
+    )
+  }
+}
+
+#[derive(
+  Debug, Clone, Serialize, Deserialize,
+)]
+#[serde(default)]
+pub struct SoundFontProfile {
+  pub soundfont_path: String,
+  pub bank: u8,
+  pub preset: u8,
+  pub channel: u8,
+  pub maximum_polyphony: usize,
+  pub enable_reverb_and_chorus: bool,
+  pub instrument_gain_multiplier: f32
+}
+
+impl Default for SoundFontProfile {
+  fn default() -> Self {
+    Self {
+      soundfont_path: "res/soundfonts/\
+                       piano.sf2"
+        .to_string(),
+      bank: 0,
+      preset: 0,
+      channel: 0,
+      maximum_polyphony: 128,
+      enable_reverb_and_chorus: true,
+      instrument_gain_multiplier: 1.0
+    }
+  }
+}
+
+impl AudioConfig {
+  pub fn active_profile(
+    &self
+  ) -> Option<(&str, &InstrumentProfile)>
+  {
+    self
+      .instrument_profiles
+      .get_key_value(&self.instrument)
+      .map(|(name, profile)| {
+        (name.as_str(), profile)
+      })
+  }
+
+  pub fn active_profile_summary(
+    &self
+  ) -> String {
+    if let Some((
+      profile_name,
+      profile
+    )) = self.active_profile()
+    {
+      match profile {
+        | InstrumentProfile::Soundfont(
+          sf2
+        ) => {
+          format!(
+            "{profile_name} \
+             (soundfont \
+             bank={} preset={} \
+             channel={})",
+            sf2.bank, sf2.preset,
+            sf2.channel
+          )
+        }
+      }
+    } else {
+      format!(
+        "{} (missing profile)",
+        self.instrument
+      )
+    }
+  }
 }
 
 #[derive(
@@ -278,12 +359,71 @@ fn validate_config(
     );
   }
 
-  if config.audio.sample_rate_hz < 8_000
+  if config.audio.release_duration_ms
+    == 0
+  {
+    bail!(
+      "audio.release_duration_ms must \
+       be > 0"
+    );
+  }
+
+  if config.audio.sample_rate_hz
+    < 16_000
+    || config.audio.sample_rate_hz
+      > 192_000
   {
     bail!(
       "audio.sample_rate_hz must be \
-       >= 8000"
+       in range 16000..=192000"
     );
+  }
+
+  if config
+    .audio
+    .instrument
+    .trim()
+    .is_empty()
+  {
+    bail!(
+      "audio.instrument cannot be \
+       empty"
+    );
+  }
+
+  if config
+    .audio
+    .instrument_profiles
+    .is_empty()
+  {
+    bail!(
+      "audio.instrument_profiles must \
+       define at least one profile"
+    );
+  }
+
+  if !config
+    .audio
+    .instrument_profiles
+    .contains_key(
+      &config.audio.instrument
+    )
+  {
+    bail!(
+      "audio.instrument='{}' does not \
+       match any audio.\
+       instrument_profiles key",
+      config.audio.instrument
+    );
+  }
+
+  for (profile_name, profile) in
+    &config.audio.instrument_profiles
+  {
+    validate_instrument_profile(
+      profile_name,
+      profile
+    )?;
   }
 
   if config.keybindings.is_empty() {
@@ -327,6 +467,88 @@ fn validate_config(
   }
 
   Ok(())
+}
+
+fn validate_instrument_profile(
+  profile_name: &str,
+  profile: &InstrumentProfile
+) -> Result<()> {
+  match profile {
+    | InstrumentProfile::Soundfont(
+      sf2
+    ) => {
+      if sf2
+        .soundfont_path
+        .trim()
+        .is_empty()
+      {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.\
+           soundfont_path cannot be \
+           empty"
+        );
+      }
+
+      if sf2.bank > 127 {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.bank must \
+           be <= 127"
+        );
+      }
+
+      if sf2.preset > 127 {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.preset must \
+           be <= 127"
+        );
+      }
+
+      if sf2.channel > 15 {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.channel \
+           must be <= 15"
+        );
+      }
+
+      if !(8..=256).contains(
+        &sf2.maximum_polyphony
+      ) {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.\
+           maximum_polyphony must be \
+           in range 8..=256"
+        );
+      }
+
+      if !(0.0..=2.5).contains(
+        &sf2.instrument_gain_multiplier
+      ) {
+        bail!(
+          "audio.instrument_profiles.\
+           {profile_name}.\
+           instrument_gain_multiplier \
+           must be between 0.0 and 2.5"
+        );
+      }
+    }
+  }
+
+  Ok(())
+}
+
+fn default_instrument_profiles()
+-> BTreeMap<String, InstrumentProfile> {
+  let mut map = BTreeMap::new();
+  map.insert(
+    "piano".to_string(),
+    InstrumentProfile::default()
+  );
+  map
 }
 
 fn default_keybindings()
