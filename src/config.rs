@@ -261,17 +261,25 @@ impl Default for ControlBindings {
 )]
 #[serde(default)]
 pub struct SongLibraryConfig {
-  pub directory:   String,
-  pub schema_path: String
+  pub directory:       String,
+  pub midi_directory:  String,
+  pub schema_path:     String,
+  pub cache_directory: String
 }
 
 impl Default for SongLibraryConfig {
   fn default() -> Self {
     Self {
-      directory:   "res/songs"
+      directory:       "res/songs"
         .to_string(),
-      schema_path: "res/songs/schema/\
-                    song.schema.json"
+      midi_directory:  "res/assets/\
+                        midi"
+        .to_string(),
+      schema_path:
+        "res/songs/schema/song.schema.\
+         json"
+          .to_string(),
+      cache_directory: ".cache/songs"
         .to_string()
     }
   }
@@ -456,12 +464,36 @@ fn validate_config(
 
   if config
     .song_library
+    .midi_directory
+    .trim()
+    .is_empty()
+  {
+    bail!(
+      "song_library.midi_directory \
+       cannot be empty"
+    );
+  }
+
+  if config
+    .song_library
     .schema_path
     .trim()
     .is_empty()
   {
     bail!(
       "song_library.schema_path \
+       cannot be empty"
+    );
+  }
+
+  if config
+    .song_library
+    .cache_directory
+    .trim()
+    .is_empty()
+  {
+    bail!(
+      "song_library.cache_directory \
        cannot be empty"
     );
   }

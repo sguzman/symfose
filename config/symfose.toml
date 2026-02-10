@@ -34,7 +34,9 @@ play_song = ["f5"]
 
 [song_library]
 directory = "res/songs"
+midi_directory = "res/assets/midi"
 schema_path = "res/songs/schema/song.schema.json"
+cache_directory = ".cache/songs"
 
 [keybindings]
 "a" = 60

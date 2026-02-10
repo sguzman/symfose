@@ -32,6 +32,7 @@ use iced::widget::{
   button,
   column,
   container,
+  mouse_area,
   pick_list,
   row,
   scrollable,
@@ -287,6 +288,7 @@ enum Message {
     bool
   ),
   TutorialPlayBadNotesChanged(bool),
+  PlayNoteFromClick(u8),
   Tick(Instant)
 }
 
@@ -346,9 +348,16 @@ fn main() -> Result<()> {
 
   let initial_state = PianoApp {
     startup_notice: format!(
-      "Loaded {} song(s) from {}",
+      "Loaded {} song(s) from \
+       sources: {}, {} (cache: {})",
       songs.len(),
-      config.song_library.directory
+      config.song_library.directory,
+      config
+        .song_library
+        .midi_directory,
+      config
+        .song_library
+        .cache_directory
     ),
     selected_song,
     prepared_song,
@@ -458,6 +467,23 @@ fn update(
         .play_bad_notes_out_loud =
         value;
       info!(value, "tutorial play_bad_notes_out_loud updated");
+    }
+    | Message::PlayNoteFromClick(
+      midi_note
+    ) => {
+      app.flash_note(midi_note);
+      let play_out_loud = app
+        .process_note_input(midi_note);
+      if play_out_loud {
+        app.audio.play_note(midi_note);
+      }
+
+      let line = format!(
+        "click -> {} ({midi_note})",
+        midi_note_name(midi_note)
+      );
+      app.push_activity(line);
+      info!(midi_note, note = %midi_note_name(midi_note), "piano key clicked");
     }
     | Message::Tick(now) => {
       app.handle_tick(now);
@@ -1084,19 +1110,24 @@ fn white_key_widget<'a>(
   let style =
     white_key_style(active, guided);
 
-  container(
-    column![
-      space().height(Length::Fill),
-      text(label).size(18),
-      text(midi_note_name(note))
-        .size(12),
-    ]
-    .spacing(4)
+  mouse_area(
+    container(
+      column![
+        space().height(Length::Fill),
+        text(label).size(18),
+        text(midi_note_name(note))
+          .size(12),
+      ]
+      .spacing(4)
+    )
+    .width(WHITE_KEY_WIDTH)
+    .height(WHITE_KEY_HEIGHT)
+    .padding([8, 6])
+    .style(move |_| style)
   )
-  .width(WHITE_KEY_WIDTH)
-  .height(WHITE_KEY_HEIGHT)
-  .padding([8, 6])
-  .style(move |_| style)
+  .on_press(Message::PlayNoteFromClick(
+    note
+  ))
   .into()
 }
 
@@ -1114,18 +1145,23 @@ fn black_key_widget<'a>(
   let style =
     black_key_style(active, guided);
 
-  container(
-    column![
-      text(label).size(16),
-      text(midi_note_name(note))
-        .size(11),
-    ]
-    .spacing(2)
+  mouse_area(
+    container(
+      column![
+        text(label).size(16),
+        text(midi_note_name(note))
+          .size(11),
+      ]
+      .spacing(2)
+    )
+    .width(BLACK_KEY_WIDTH)
+    .height(BLACK_KEY_HEIGHT)
+    .padding([8, 4])
+    .style(move |_| style)
   )
-  .width(BLACK_KEY_WIDTH)
-  .height(BLACK_KEY_HEIGHT)
-  .padding([8, 4])
-  .style(move |_| style)
+  .on_press(Message::PlayNoteFromClick(
+    note
+  ))
   .into()
 }
 
@@ -1139,8 +1175,8 @@ fn songs_panel(
   if app.songs.is_empty() {
     songs_column =
       songs_column.push(text(
-        "No song files found in \
-         res/songs."
+        "No songs found in \
+         song_library directories."
       ));
   } else {
     for (index, loaded) in

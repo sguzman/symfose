@@ -23,9 +23,11 @@ Symfose is being built to support:
 - desktop GUI app (`iced`)
 - playable keyboard piano in a native window
 - horizontal white/black piano key layout with horizontal scrolling when needed
-- reactive key visuals for physical keypresses and autoplay touches
+- reactive key visuals for physical keypresses, mouse clicks, and autoplay touches
 - realistic piano synthesis through SoundFont (`SF2`) rendering via `rustysynth`
 - song library loaded from `res/songs/*.toml`
+- MIDI song ingestion from `res/assets/midi/*.mid|*.midi`
+- source processing cache in `.cache/songs/v1/` for fast warm startups
 - song key/timing lane rendered above the keyboard (virtual-piano style)
 - three song modes:
   - `Timer`: metronome + note/timing scoring
@@ -66,6 +68,7 @@ You can replace the bundled file with any compatible SF2 and adjust bank/preset 
 ## Controls (Default)
 
 - Piano notes: `a w s e d f t g y h u j k o l p ;`
+- Piano mouse input: click white/black keys directly
 - Quit: `esc` or `ctrl+c`
 - Next song: `f1`
 - Binding summary hint: `f2`
@@ -84,6 +87,13 @@ Key audio settings:
 - `audio.note_duration_ms`: default keypress hold length
 - `audio.release_duration_ms`: release tail rendered after note-off
 - `audio.instrument_profiles.<name>`: per-instrument profile
+
+Key song-library settings:
+
+- `song_library.directory`: TOML songs directory
+- `song_library.midi_directory`: MIDI drop folder (loader input)
+- `song_library.schema_path`: TOML schema file path
+- `song_library.cache_directory`: normalized song cache output
 
 Example profile:
 
@@ -122,6 +132,19 @@ Song files include:
   - `notes` (MIDI note list/chords)
   - optional `velocity`
   - optional hand metadata/lyrics/accent flags
+
+## Loader Cache
+
+Symfose treats resource folders as loader inputs and normalizes source files into a cache:
+
+- TOML source songs: `res/songs`
+- MIDI source songs: `res/assets/midi`
+- Cache root: `.cache/songs`
+- Cache layout:
+  - `.cache/songs/v1/toml/*.toml`
+  - `.cache/songs/v1/midi/*.toml`
+
+On startup, source files are fingerprinted (mtime + size). If unchanged, Symfose loads the cached normalized song instead of reparsing source.
 
 ## Repository Layout
 

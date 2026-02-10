@@ -4,3 +4,4 @@ tmp
 dups.json
 logs
 res/assets
+.cache
