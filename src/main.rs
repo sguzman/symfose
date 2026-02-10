@@ -1419,26 +1419,33 @@ fn songs_panel(
         loaded.song.meta.title,
         loaded.song.meta.tempo_bpm
       );
-      let mut tag_row =
-        row!().spacing(4);
-      for tag in &loaded.song.meta.tags
+      let mut tag_column =
+        column!().spacing(4);
+      for chunk in
+        loaded.song.meta.tags.chunks(2)
       {
-        let tag_text =
-          text(tag.clone())
-            .size(11)
-            .color(Color::from_rgb(
-              0.10, 0.62, 0.18
-            ));
-        tag_row = tag_row.push(
-          button(tag_text)
-            .padding([1, 6])
-            .style(tag_chip_button_style)
-            .on_press(
-              Message::ApplySongTagFilter(
-                tag.clone()
+        let mut tag_row =
+          row!().spacing(4);
+        for tag in chunk {
+          let tag_text =
+            text(tag.clone())
+              .size(11)
+              .color(Color::from_rgb(
+                0.10, 0.62, 0.18
+              ));
+          tag_row = tag_row.push(
+            button(tag_text)
+              .padding([1, 6])
+              .style(tag_chip_button_style)
+              .on_press(
+                Message::ApplySongTagFilter(
+                  tag.clone()
+                )
               )
-            )
-        );
+          );
+        }
+        tag_column =
+          tag_column.push(tag_row);
       }
 
       songs_column = songs_column.push(
@@ -1450,8 +1457,9 @@ fn songs_panel(
                 index
               )
             ),
-          container(tag_row)
-            .align_y(iced::Center),
+          container(tag_column)
+            .align_y(iced::Center)
+            .width(Length::Shrink),
         ]
         .spacing(6)
         .align_y(iced::Center)
