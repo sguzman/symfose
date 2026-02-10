@@ -185,6 +185,7 @@ Tracing is enabled throughout startup, input handling, audio rendering, and song
 
 - console logs: live run diagnostics
 - file logs: `logs/` (rolling appender)
+- config filter: `logging.filter` (default: `info`)
 
 ## Development
 

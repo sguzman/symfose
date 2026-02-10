@@ -2477,7 +2477,7 @@ fn init_tracing(
     EnvFilter::try_from_default_env()
       .unwrap_or_else(|_| {
         EnvFilter::new(
-          config.logging.level.clone()
+          config.logging.filter.clone()
         )
       });
 

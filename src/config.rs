@@ -84,15 +84,15 @@ impl Default for AppSection {
 )]
 #[serde(default)]
 pub struct LoggingConfig {
-  pub level:     String,
+  #[serde(alias = "level")]
+  pub filter:    String,
   pub directory: String
 }
 
 impl Default for LoggingConfig {
   fn default() -> Self {
     Self {
-      level:     "symfose=debug,info"
-        .to_string(),
+      filter:    "info".to_string(),
       directory: "logs".to_string()
     }
   }
