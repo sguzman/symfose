@@ -72,8 +72,7 @@ use crate::audio::AudioEngine;
 use crate::config::{
   AppConfig,
   DEFAULT_CONFIG_PATH,
-  KeyboardLayout,
-  keyboard_layout_key_priority
+  KeyboardLayout
 };
 use crate::input::{
   KeyChord,
@@ -306,6 +305,7 @@ enum Message {
   OptimizeBindingsForSongChanged(bool),
   PlayNoteFromClick(u8),
   SongSearchChanged(String),
+  ApplySongTagFilter(String),
   InstrumentSelected(String),
   Tick(Instant)
 }
@@ -544,6 +544,11 @@ fn update(
       query
     ) => {
       app.song_search_query = query;
+    }
+    | Message::ApplySongTagFilter(
+      tag
+    ) => {
+      app.song_search_query = tag;
     }
     | Message::InstrumentSelected(
       instrument
@@ -1414,11 +1419,42 @@ fn songs_panel(
         loaded.song.meta.title,
         loaded.song.meta.tempo_bpm
       );
+      let mut tag_row =
+        row!().spacing(4);
+      for tag in &loaded.song.meta.tags
+      {
+        let tag_text =
+          text(tag.clone())
+            .size(11)
+            .color(Color::from_rgb(
+              0.10, 0.62, 0.18
+            ));
+        tag_row = tag_row.push(
+          button(tag_text)
+            .padding([1, 6])
+            .style(tag_chip_button_style)
+            .on_press(
+              Message::ApplySongTagFilter(
+                tag.clone()
+              )
+            )
+        );
+      }
 
       songs_column = songs_column.push(
-        button(text(caption)).on_press(
-          Message::SelectSong(index)
-        )
+        row![
+          button(text(caption))
+            .width(Length::Fill)
+            .on_press(
+              Message::SelectSong(
+                index
+              )
+            ),
+          container(tag_row)
+            .align_y(iced::Center),
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
       );
     }
   }
@@ -2549,19 +2585,38 @@ fn apply_song_ergonomic_bindings(
   layout: KeyboardLayout
 ) {
   let mut note_scores =
-    BTreeMap::<u8, usize>::new();
+    HashMap::<u8, usize>::new();
+  let mut cooccur =
+    HashMap::<(u8, u8), usize>::new();
+
   for event in &song.events {
+    let mut notes = event.notes.clone();
+    notes.sort_unstable();
+    notes.dedup();
+    if notes.is_empty() {
+      continue;
+    }
+
     let chord_bonus =
-      if event.notes.len() > 1 {
-        2usize
-      } else {
-        0usize
-      };
-    for note in &event.notes {
+      notes.len().saturating_sub(1) * 3;
+    for note in &notes {
       *note_scores
         .entry(*note)
         .or_default() +=
         1 + chord_bonus;
+    }
+
+    for left in 0..notes.len() {
+      for right in
+        (left + 1)..notes.len()
+      {
+        *cooccur
+          .entry((
+            notes[left],
+            notes[right]
+          ))
+          .or_default() += 1;
+      }
     }
   }
 
@@ -2571,7 +2626,7 @@ fn apply_song_ergonomic_bindings(
 
   let mut ranked_notes = note_scores
     .into_iter()
-    .collect::<Vec<(u8, usize)>>();
+    .collect::<Vec<_>>();
   ranked_notes.sort_by(
     |left, right| {
       right
@@ -2581,33 +2636,132 @@ fn apply_song_ergonomic_bindings(
     }
   );
 
-  let mut free_keys =
-    keyboard_layout_key_priority(
-      layout
-    )
-    .iter()
-    .map(|entry| entry.to_string())
-    .collect::<Vec<_>>();
-  if free_keys.is_empty() {
+  let mut left_pool =
+    ergonomic_left_keys(layout);
+  let mut right_pool =
+    ergonomic_right_keys(layout);
+  if left_pool.is_empty()
+    && right_pool.is_empty()
+  {
     return;
   }
 
-  let mut next_map =
-    bindings.note_bindings.clone();
-  for (note, _) in ranked_notes {
-    let Some(key) = free_keys.first()
-    else {
-      break;
-    };
-    let key = key.clone();
-    free_keys.remove(0);
+  let song_notes = ranked_notes
+    .iter()
+    .map(|(note, _)| *note)
+    .collect::<HashSet<_>>();
+  let mut next_map = bindings
+    .note_bindings
+    .iter()
+    .filter_map(|(chord, note)| {
+      (!song_notes.contains(note))
+        .then_some((
+          chord.clone(),
+          *note
+        ))
+    })
+    .collect::<HashMap<_, _>>();
 
-    let parsed =
-      crate::input::parse_chord(&key);
-    let Ok(chord) = parsed else {
+  let mut keys_in_use = next_map
+    .keys()
+    .map(|chord| chord.to_string())
+    .collect::<HashSet<_>>();
+  left_pool.retain(|key| {
+    !keys_in_use.contains(key)
+  });
+  right_pool.retain(|key| {
+    !keys_in_use.contains(key)
+  });
+
+  let mut assigned_side =
+    HashMap::<u8, bool>::new();
+  let median_note = ranked_notes
+    .iter()
+    .map(|(note, _)| *note as f32)
+    .sum::<f32>()
+    / ranked_notes.len() as f32;
+
+  for (note, score) in &ranked_notes {
+    let mut same_left_penalty = 0usize;
+    let mut same_right_penalty = 0usize;
+    for (other, on_left) in
+      &assigned_side
+    {
+      let pair = if note < other {
+        (*note, *other)
+      } else {
+        (*other, *note)
+      };
+      let weight = cooccur
+        .get(&pair)
+        .copied()
+        .unwrap_or(0);
+      if *on_left {
+        same_left_penalty += weight;
+      } else {
+        same_right_penalty += weight;
+      }
+    }
+
+    let prefer_left_by_pitch =
+      (*note as f32) <= median_note;
+    let choose_left =
+      if same_left_penalty
+        != same_right_penalty
+      {
+        same_left_penalty
+          < same_right_penalty
+      } else {
+        let left_open = left_pool.len();
+        let right_open =
+          right_pool.len();
+        if left_open != right_open {
+          left_open > right_open
+        } else {
+          prefer_left_by_pitch
+        }
+      };
+
+    let key = if choose_left {
+      take_first_available(
+        &mut left_pool
+      )
+      .or_else(|| {
+        take_first_available(
+          &mut right_pool
+        )
+      })
+    } else {
+      take_first_available(
+        &mut right_pool
+      )
+      .or_else(|| {
+        take_first_available(
+          &mut left_pool
+        )
+      })
+    };
+
+    let Some(key) = key else {
       continue;
     };
-    next_map.insert(chord, note);
+
+    let Ok(chord) =
+      crate::input::parse_chord(&key)
+    else {
+      continue;
+    };
+    keys_in_use.insert(key);
+    next_map.insert(chord, *note);
+    assigned_side
+      .insert(*note, choose_left);
+
+    trace!(
+      midi_note = note,
+      score,
+      choose_left,
+      "song ergonomic binding assigned"
+    );
   }
 
   let mut note_to_chords =
@@ -2628,6 +2782,61 @@ fn apply_song_ergonomic_bindings(
   bindings.note_bindings = next_map;
   bindings.note_to_chords =
     note_to_chords;
+
+  info!(
+    song_notes = song_notes.len(),
+    mapped_notes =
+      bindings.note_to_chords.len(),
+    "applied ergonomic bindings for \
+     selected song"
+  );
+}
+
+fn ergonomic_left_keys(
+  layout: KeyboardLayout
+) -> Vec<String> {
+  match layout {
+    | KeyboardLayout::Ansi104 => {
+      vec![
+        "f", "d", "s", "a", "g", "r",
+        "e", "w", "q", "v", "c", "x",
+        "z", "t", "b", "5", "4", "3",
+        "2", "1", "`",
+      ]
+      .into_iter()
+      .map(str::to_string)
+      .collect()
+    }
+  }
+}
+
+fn ergonomic_right_keys(
+  layout: KeyboardLayout
+) -> Vec<String> {
+  match layout {
+    | KeyboardLayout::Ansi104 => {
+      vec![
+        "j", "k", "l", ";", "h", "u",
+        "i", "o", "p", "n", "m", ",",
+        ".", "/", "'", "6", "7", "8",
+        "9", "0", "-", "=", "[", "]",
+        "\\",
+      ]
+      .into_iter()
+      .map(str::to_string)
+      .collect()
+    }
+  }
+}
+
+fn take_first_available(
+  pool: &mut Vec<String>
+) -> Option<String> {
+  if pool.is_empty() {
+    None
+  } else {
+    Some(pool.remove(0))
+  }
 }
 
 fn prepare_song_for_bindings(
@@ -2878,6 +3087,63 @@ fn white_key_style(
     );
 
   style
+}
+
+fn tag_chip_button_style(
+  _theme: &Theme,
+  status: button::Status
+) -> button::Style {
+  let base = button::Style {
+    background: Some(
+      Color::from_rgba(
+        0.12, 0.62, 0.20, 0.12
+      )
+      .into()
+    ),
+    border: border::rounded(12)
+      .width(1)
+      .color(Color::from_rgba(
+        0.12, 0.62, 0.20, 0.55
+      )),
+    text_color: Color::from_rgb(
+      0.10, 0.62, 0.18
+    ),
+    ..Default::default()
+  };
+
+  match status {
+    | button::Status::Hovered => {
+      button::Style {
+        background: Some(
+          Color::from_rgba(
+            0.12, 0.62, 0.20, 0.22
+          )
+          .into()
+        ),
+        ..base
+      }
+    }
+    | button::Status::Pressed => {
+      button::Style {
+        background: Some(
+          Color::from_rgba(
+            0.12, 0.62, 0.20, 0.34
+          )
+          .into()
+        ),
+        ..base
+      }
+    }
+    | button::Status::Disabled => {
+      button::Style {
+        text_color: Color::from_rgba(
+          0.10, 0.62, 0.18, 0.5
+        ),
+        ..base
+      }
+    }
+    | _ => base
+  }
 }
 
 fn black_key_style(
