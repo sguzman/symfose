@@ -1283,15 +1283,26 @@ fn songs_panel(
 ) -> Element<'_, Message> {
   let filtered_indices =
     app.filtered_song_indices();
-  let mut songs_column = column![
-    text("Song Search").size(18),
+  let search_bar = row![
     text_input(
       "Search title, artist, id, tag",
       &app.song_search_query
     )
     .on_input(
       Message::SongSearchChanged
+    )
+    .width(Length::Fill),
+    button(text("X")).on_press(
+      Message::SongSearchChanged(
+        String::new()
+      )
     ),
+  ]
+  .spacing(6);
+
+  let mut songs_column = column![
+    text("Song Search").size(18),
+    search_bar,
     text(format!(
       "Results: {} / {}",
       filtered_indices.len(),
