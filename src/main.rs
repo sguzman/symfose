@@ -71,7 +71,9 @@ use tracing_subscriber::{
 use crate::audio::AudioEngine;
 use crate::config::{
   AppConfig,
-  DEFAULT_CONFIG_PATH
+  DEFAULT_CONFIG_PATH,
+  KeyboardLayout,
+  keyboard_layout_key_priority
 };
 use crate::input::{
   KeyChord,
@@ -108,24 +110,29 @@ struct RuntimeBindings {
 }
 
 struct PianoApp {
-  config:              AppConfig,
-  bindings:            RuntimeBindings,
-  songs:               Vec<LoadedSong>,
-  audio:               AudioEngine,
-  selected_song:       Option<usize>,
+  config: AppConfig,
+  bindings: RuntimeBindings,
+  songs: Vec<LoadedSong>,
+  audio: AudioEngine,
+  selected_song: Option<usize>,
   prepared_song: Option<PreparedSong>,
-  held_notes:          HashSet<u8>,
+  held_notes: HashSet<u8>,
   flashed_notes: HashMap<u8, Instant>,
-  activity:            Vec<String>,
-  startup_notice:      String,
-  song_search_query:   String,
-  instrument_options:  Vec<String>,
+  activity: Vec<String>,
+  startup_notice: String,
+  song_search_query: String,
+  instrument_options: Vec<String>,
   selected_instrument: String,
-  play_mode:           PlayMode,
-  tutorial_options:    TutorialOptions,
+  transpose_song_to_fit_bindings: bool,
+  warn_on_missing_song_notes: bool,
+  optimize_bindings_for_song: bool,
+  prepared_transpose_semitones: i8,
+  missing_song_notes: Vec<u8>,
+  play_mode: PlayMode,
+  tutorial_options: TutorialOptions,
   playback: Option<PlaybackState>,
   last_timer_score: Option<TimerScore>,
-  volume:              f32
+  volume: f32
 }
 
 #[derive(Debug, Clone)]
@@ -292,6 +299,11 @@ enum Message {
     bool
   ),
   TutorialPlayBadNotesChanged(bool),
+  TransposeSongToFitBindingsChanged(
+    bool
+  ),
+  WarnOnMissingSongNotesChanged(bool),
+  OptimizeBindingsForSongChanged(bool),
   PlayNoteFromClick(u8),
   SongSearchChanged(String),
   InstrumentSelected(String),
@@ -350,14 +362,7 @@ fn main() -> Result<()> {
       Some(0)
     };
 
-  let prepared_song = selected_song
-    .and_then(|index| {
-      songs.get(index).map(|song| {
-        prepare_song(&song.song)
-      })
-    });
-
-  let initial_state = PianoApp {
+  let mut initial_state = PianoApp {
     startup_notice: format!(
       "Loaded {} song(s) from \
        sources: {}, {} (cache: {})",
@@ -371,11 +376,23 @@ fn main() -> Result<()> {
         .cache_directory
     ),
     selected_song,
-    prepared_song,
+    prepared_song: None,
     volume: audio.master_volume(),
     song_search_query: String::new(),
     instrument_options,
     selected_instrument,
+    transpose_song_to_fit_bindings:
+      config
+        .gameplay
+        .transpose_song_to_fit_bindings,
+    warn_on_missing_song_notes: config
+      .gameplay
+      .warn_on_missing_song_notes,
+    optimize_bindings_for_song: config
+      .gameplay
+      .optimize_bindings_for_song,
+    prepared_transpose_semitones: 0,
+    missing_song_notes: Vec::new(),
     config,
     bindings,
     songs,
@@ -394,6 +411,7 @@ fn main() -> Result<()> {
     playback: None,
     last_timer_score: None
   };
+  initial_state.rebuild_song_context();
 
   let state_slot =
     RefCell::new(Some(initial_state));
@@ -481,6 +499,29 @@ fn update(
         .play_bad_notes_out_loud =
         value;
       info!(value, "tutorial play_bad_notes_out_loud updated");
+    }
+    | Message::TransposeSongToFitBindingsChanged(
+      value
+    ) => {
+      app.transpose_song_to_fit_bindings =
+        value;
+      app.rebuild_song_context();
+      info!(value, "transpose_song_to_fit_bindings updated");
+    }
+    | Message::WarnOnMissingSongNotesChanged(
+      value
+    ) => {
+      app.warn_on_missing_song_notes =
+        value;
+      info!(value, "warn_on_missing_song_notes updated");
+    }
+    | Message::OptimizeBindingsForSongChanged(
+      value
+    ) => {
+      app.optimize_bindings_for_song =
+        value;
+      app.rebuild_song_context();
+      info!(value, "optimize_bindings_for_song updated");
     }
     | Message::PlayNoteFromClick(
       midi_note
@@ -800,6 +841,10 @@ fn controls_panel(
   let controls = column![
     text("Controls").size(22),
     text(format!(
+      "Keyboard: {}",
+      app.config.keyboard.layout
+    )),
+    text(format!(
       "Quit: {}",
       app
         .config
@@ -858,7 +903,45 @@ fn controls_panel(
   ]
   .spacing(6)
   .push(mode_picker)
-  .push(playback_controls);
+  .push(playback_controls)
+  .push(
+    toggler(
+      app
+        .transpose_song_to_fit_bindings
+    )
+    .label(
+      "Transpose song to fit \
+       playable keys"
+    )
+    .on_toggle(
+      Message::TransposeSongToFitBindingsChanged
+    )
+  )
+  .push(
+    toggler(
+      app
+        .warn_on_missing_song_notes
+    )
+    .label(
+      "Warn when selected song has \
+       unmapped notes"
+    )
+    .on_toggle(
+      Message::WarnOnMissingSongNotesChanged
+    )
+  )
+  .push(
+    toggler(
+      app.optimize_bindings_for_song
+    )
+    .label(
+      "Optimize key ergonomics for \
+       selected song"
+    )
+    .on_toggle(
+      Message::OptimizeBindingsForSongChanged
+    )
+  );
 
   if app.play_mode == PlayMode::Tutorial
   {
@@ -1441,8 +1524,44 @@ fn selected_song_details(
         }
       )
     )),
+    text(format!(
+      "Transpose applied: {} \
+       semitone(s)",
+      app.prepared_transpose_semitones
+    )),
   ]
   .spacing(4);
+
+  if app.warn_on_missing_song_notes {
+    if app.missing_song_notes.is_empty()
+    {
+      info_column =
+        info_column.push(text(
+          "Mapping check: all song \
+           notes are currently \
+           playable."
+        ));
+    } else {
+      let list = app
+        .missing_song_notes
+        .iter()
+        .map(|note| {
+          format!(
+            "{} ({})",
+            midi_note_name(*note),
+            note
+          )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+      info_column = info_column.push(
+        text(format!(
+          "Missing key mappings: \
+           {list}"
+        ))
+      );
+    }
+  }
 
   if let Some(score) = app
     .playback
@@ -1560,6 +1679,75 @@ impl PianoApp {
       })
       .map(|(index, _)| index)
       .collect::<Vec<_>>()
+  }
+
+  fn rebuild_song_context(&mut self) {
+    let mut bindings =
+      match compile_runtime_bindings(
+        &self.config
+      ) {
+        | Ok(compiled) => compiled,
+        | Err(error) => {
+          self.push_activity(format!(
+            "Failed to compile \
+             bindings: {error}"
+          ));
+          return;
+        }
+      };
+
+    if self.optimize_bindings_for_song {
+      if let Some(index) =
+        self.selected_song
+      {
+        if let Some(song) =
+          self.songs.get(index)
+        {
+          apply_song_ergonomic_bindings(
+            &mut bindings,
+            &song.song,
+            self.config.keyboard.layout
+          );
+        }
+      }
+    }
+
+    self.bindings = bindings;
+
+    let (prepared, transpose, missing) =
+      self
+        .selected_song
+        .and_then(|index| {
+          self.songs.get(index)
+        })
+        .map_or(
+          (None, 0i8, Vec::new()),
+          |loaded| {
+            prepare_song_for_bindings(
+              &loaded.song,
+              &self.bindings,
+              self
+                .transpose_song_to_fit_bindings
+            )
+          }
+        );
+
+    self.prepared_song = prepared;
+    self.prepared_transpose_semitones =
+      transpose;
+    self.missing_song_notes = missing;
+
+    if self.warn_on_missing_song_notes
+      && !self
+        .missing_song_notes
+        .is_empty()
+    {
+      self.push_activity(format!(
+        "Selected song has {} note(s) \
+         without key mappings.",
+        self.missing_song_notes.len()
+      ));
+    }
   }
 
   fn push_activity(
@@ -1736,10 +1924,7 @@ impl PianoApp {
     index: usize
   ) {
     self.selected_song = Some(index);
-    self.prepared_song =
-      self.songs.get(index).map(
-        |song| prepare_song(&song.song)
-      );
+    self.rebuild_song_context();
 
     self.playback = None;
     self.last_timer_score = None;
@@ -2311,7 +2496,7 @@ fn compile_runtime_bindings(
 ) -> Result<RuntimeBindings> {
   let note_bindings =
     compile_note_bindings(
-      &config.keybindings
+      &config.effective_keybindings()
     )?;
   let quit = compile_chord_set(
     &config.control_bindings.quit,
@@ -2356,6 +2541,214 @@ fn compile_runtime_bindings(
     print_bindings,
     play_song
   })
+}
+
+fn apply_song_ergonomic_bindings(
+  bindings: &mut RuntimeBindings,
+  song: &SongFile,
+  layout: KeyboardLayout
+) {
+  let mut note_scores =
+    BTreeMap::<u8, usize>::new();
+  for event in &song.events {
+    let chord_bonus =
+      if event.notes.len() > 1 {
+        2usize
+      } else {
+        0usize
+      };
+    for note in &event.notes {
+      *note_scores
+        .entry(*note)
+        .or_default() +=
+        1 + chord_bonus;
+    }
+  }
+
+  if note_scores.is_empty() {
+    return;
+  }
+
+  let mut ranked_notes = note_scores
+    .into_iter()
+    .collect::<Vec<(u8, usize)>>();
+  ranked_notes.sort_by(
+    |left, right| {
+      right
+        .1
+        .cmp(&left.1)
+        .then(left.0.cmp(&right.0))
+    }
+  );
+
+  let mut free_keys =
+    keyboard_layout_key_priority(
+      layout
+    )
+    .iter()
+    .map(|entry| entry.to_string())
+    .collect::<Vec<_>>();
+  if free_keys.is_empty() {
+    return;
+  }
+
+  let mut next_map =
+    bindings.note_bindings.clone();
+  for (note, _) in ranked_notes {
+    let Some(key) = free_keys.first()
+    else {
+      break;
+    };
+    let key = key.clone();
+    free_keys.remove(0);
+
+    let parsed =
+      crate::input::parse_chord(&key);
+    let Ok(chord) = parsed else {
+      continue;
+    };
+    next_map.insert(chord, note);
+  }
+
+  let mut note_to_chords =
+    BTreeMap::<u8, Vec<String>>::new();
+  for (chord, note) in &next_map {
+    note_to_chords
+      .entry(*note)
+      .or_default()
+      .push(chord.to_string());
+  }
+
+  for chords in
+    note_to_chords.values_mut()
+  {
+    chords.sort_unstable();
+  }
+
+  bindings.note_bindings = next_map;
+  bindings.note_to_chords =
+    note_to_chords;
+}
+
+fn prepare_song_for_bindings(
+  source_song: &SongFile,
+  bindings: &RuntimeBindings,
+  transpose_to_fit: bool
+) -> (Option<PreparedSong>, i8, Vec<u8>)
+{
+  let available_notes = bindings
+    .note_to_chords
+    .keys()
+    .copied()
+    .collect::<HashSet<_>>();
+
+  let transpose = if transpose_to_fit {
+    choose_transpose_for_fit(
+      source_song,
+      &available_notes
+    )
+  } else {
+    0
+  };
+
+  let adapted_song = if transpose != 0 {
+    transpose_song_by_semitones(
+      source_song,
+      transpose
+    )
+  } else {
+    source_song.clone()
+  };
+
+  let prepared =
+    prepare_song(&adapted_song);
+  let mut missing = prepared
+    .expected_notes
+    .iter()
+    .map(|entry| entry.midi_note)
+    .filter(|note| {
+      !available_notes.contains(note)
+    })
+    .collect::<Vec<_>>();
+  missing.sort_unstable();
+  missing.dedup();
+
+  (Some(prepared), transpose, missing)
+}
+
+fn choose_transpose_for_fit(
+  song: &SongFile,
+  available_notes: &HashSet<u8>
+) -> i8 {
+  let unique_notes = song
+    .events
+    .iter()
+    .flat_map(|event| {
+      event.notes.iter()
+    })
+    .copied()
+    .collect::<HashSet<_>>();
+
+  if unique_notes.is_empty() {
+    return 0;
+  }
+
+  let shifts = [
+    -48, -36, -24, -12, 0, 12, 24, 36,
+    48
+  ];
+
+  let mut best_shift = 0i8;
+  let mut best_score = 0usize;
+
+  for shift in shifts {
+    let mut score = 0usize;
+    for note in &unique_notes {
+      let shifted =
+        i16::from(*note) + shift;
+      if !(0..=127).contains(&shifted) {
+        continue;
+      }
+      if available_notes
+        .contains(&(shifted as u8))
+      {
+        score += 1;
+      }
+    }
+
+    let shift_abs = shift.abs() as i16;
+    let best_abs =
+      i16::from(best_shift).abs();
+    let is_better = score > best_score
+      || (score == best_score
+        && shift_abs < best_abs);
+    if is_better {
+      best_score = score;
+      best_shift = shift as i8;
+    }
+  }
+
+  best_shift
+}
+
+fn transpose_song_by_semitones(
+  source: &SongFile,
+  semitones: i8
+) -> SongFile {
+  let mut cloned = source.clone();
+  let delta = i16::from(semitones);
+
+  for event in &mut cloned.events {
+    for note in &mut event.notes {
+      let shifted =
+        i16::from(*note) + delta;
+      if (0..=127).contains(&shifted) {
+        *note = shifted as u8;
+      }
+    }
+  }
+
+  cloned
 }
 
 fn prepare_song(

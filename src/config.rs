@@ -1,4 +1,9 @@
 use std::collections::BTreeMap;
+use std::fmt::{
+  Display,
+  Formatter,
+  Result as FmtResult
+};
 use std::fs;
 use std::path::Path;
 
@@ -24,6 +29,8 @@ pub struct AppConfig {
   pub logging:          LoggingConfig,
   pub audio:            AudioConfig,
   pub input:            InputConfig,
+  pub keyboard:         KeyboardConfig,
+  pub gameplay:         GameplayConfig,
   pub control_bindings: ControlBindings,
   pub keybindings: BTreeMap<String, u8>,
   pub song_library: SongLibraryConfig
@@ -40,10 +47,16 @@ impl Default for AppConfig {
         AudioConfig::default(),
       input:
         InputConfig::default(),
+      keyboard:
+        KeyboardConfig::default(),
+      gameplay:
+        GameplayConfig::default(),
       control_bindings:
         ControlBindings::default(),
       keybindings:
-        default_keybindings(),
+        default_keybindings(
+          KeyboardLayout::default()
+        ),
       song_library:
         SongLibraryConfig::default()
     }
@@ -99,6 +112,84 @@ impl Default for InputConfig {
     Self {
       allow_key_repeat:           false,
       ignore_shift_for_char_keys: true
+    }
+  }
+}
+
+#[derive(
+  Debug, Clone, Serialize, Deserialize,
+)]
+#[serde(default)]
+pub struct KeyboardConfig {
+  pub layout: KeyboardLayout,
+  pub use_layout_default_bindings: bool
+}
+
+impl Default for KeyboardConfig {
+  fn default() -> Self {
+    Self {
+      layout: KeyboardLayout::default(),
+      use_layout_default_bindings: true
+    }
+  }
+}
+
+#[derive(
+  Debug,
+  Clone,
+  Copy,
+  PartialEq,
+  Eq,
+  Serialize,
+  Deserialize,
+)]
+pub enum KeyboardLayout {
+  #[serde(
+    rename = "ansi104",
+    alias = "ansi_104"
+  )]
+  Ansi104
+}
+
+impl Default for KeyboardLayout {
+  fn default() -> Self {
+    Self::Ansi104
+  }
+}
+
+impl Display for KeyboardLayout {
+  fn fmt(
+    &self,
+    f: &mut Formatter<'_>
+  ) -> FmtResult {
+    match self {
+      | Self::Ansi104 => {
+        write!(f, "ANSI 104-key")
+      }
+    }
+  }
+}
+
+#[derive(
+  Debug, Clone, Serialize, Deserialize,
+)]
+#[serde(default)]
+pub struct GameplayConfig {
+  pub transpose_song_to_fit_bindings:
+    bool,
+  pub warn_on_missing_song_notes: bool,
+  pub optimize_bindings_for_song: bool
+}
+
+impl Default for GameplayConfig {
+  fn default() -> Self {
+    Self {
+      transpose_song_to_fit_bindings:
+        true,
+      warn_on_missing_song_notes:
+        true,
+      optimize_bindings_for_song:
+        false
     }
   }
 }
@@ -222,6 +313,30 @@ impl AudioConfig {
         self.instrument
       )
     }
+  }
+}
+
+impl AppConfig {
+  pub fn effective_keybindings(
+    &self
+  ) -> BTreeMap<String, u8> {
+    if !self
+      .keyboard
+      .use_layout_default_bindings
+    {
+      return self.keybindings.clone();
+    }
+
+    let mut merged =
+      default_keybindings(
+        self.keyboard.layout
+      );
+    for (key, note) in &self.keybindings
+    {
+      merged.insert(key.clone(), *note);
+    }
+
+    merged
   }
 }
 
@@ -434,7 +549,11 @@ fn validate_config(
     )?;
   }
 
-  if config.keybindings.is_empty() {
+  if !config
+    .keyboard
+    .use_layout_default_bindings
+    && config.keybindings.is_empty()
+  {
     bail!(
       "keybindings must define at \
        least one mapping"
@@ -599,27 +718,44 @@ fn default_instrument_profiles()
   map
 }
 
-fn default_keybindings()
--> BTreeMap<String, u8> {
-  let mut map = BTreeMap::new();
+pub fn keyboard_layout_key_priority(
+  layout: KeyboardLayout
+) -> &'static [&'static str] {
+  match layout {
+    | KeyboardLayout::Ansi104 => {
+      &[
+        "f", "j", "d", "k", "s", "l",
+        "a", ";", "g", "h", "r", "u",
+        "e", "i", "w", "o", "q", "p",
+        "t", "y", "v", "n", "c", "m",
+        "x", ",", "z", ".", "b", "'",
+        "5", "6", "4", "7", "3", "8",
+        "2", "9", "1", "0", "`", "-",
+        "=", "/", "[", "]", "\\"
+      ]
+    }
+  }
+}
 
-  map.insert("a".to_string(), 60);
-  map.insert("w".to_string(), 61);
-  map.insert("s".to_string(), 62);
-  map.insert("e".to_string(), 63);
-  map.insert("d".to_string(), 64);
-  map.insert("f".to_string(), 65);
-  map.insert("t".to_string(), 66);
-  map.insert("g".to_string(), 67);
-  map.insert("y".to_string(), 68);
-  map.insert("h".to_string(), 69);
-  map.insert("u".to_string(), 70);
-  map.insert("j".to_string(), 71);
-  map.insert("k".to_string(), 72);
-  map.insert("o".to_string(), 73);
-  map.insert("l".to_string(), 74);
-  map.insert("p".to_string(), 75);
-  map.insert(";".to_string(), 76);
+fn default_keybindings(
+  layout: KeyboardLayout
+) -> BTreeMap<String, u8> {
+  let mut map = BTreeMap::new();
+  let start_note = 48u8;
+
+  for (index, key) in
+    keyboard_layout_key_priority(layout)
+      .iter()
+      .enumerate()
+  {
+    let note = start_note
+      .saturating_add(index as u8);
+    if note > 127 {
+      break;
+    }
+    map
+      .insert((*key).to_string(), note);
+  }
 
   map
 }

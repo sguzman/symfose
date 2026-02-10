@@ -36,6 +36,15 @@ instrument_gain_multiplier = 1.1
 allow_key_repeat = false
 ignore_shift_for_char_keys = true
 
+[keyboard]
+layout = "ansi104"
+use_layout_default_bindings = true
+
+[gameplay]
+transpose_song_to_fit_bindings = true
+warn_on_missing_song_notes = true
+optimize_bindings_for_song = false
+
 [control_bindings]
 quit = ["esc", "ctrl+c"]
 list_songs = ["f1"]

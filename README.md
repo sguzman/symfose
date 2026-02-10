@@ -27,7 +27,7 @@ Symfose is being built to support:
 - realistic piano synthesis through SoundFont (`SF2`) rendering via `rustysynth`
 - song library loaded from `res/songs/*.toml`
 - MIDI song ingestion from `res/assets/midi/*.mid|*.midi`
-- source processing cache in `.cache/songs/v1/` for fast warm startups
+- source processing cache in `.cache/songs/v2/` for fast warm startups
 - song key/timing lane rendered above the keyboard (virtual-piano style)
 - three song modes:
   - `Timer`: metronome + note/timing scoring
@@ -68,7 +68,7 @@ You can replace the bundled file with any compatible SF2 and adjust bank/preset 
 
 ## Controls (Default)
 
-- Piano notes: `a w s e d f t g y h u j k o l p ;`
+- Piano notes: generated from keyboard profile (home-row-first on ANSI 104-key), then overridden by explicit `keybindings`
 - Piano mouse input: click white/black keys directly
 - Quit: `esc` or `ctrl+c`
 - Next song: `f1`
@@ -96,6 +96,14 @@ Key song-library settings:
 - `song_library.midi_directory`: MIDI drop folder (loader input)
 - `song_library.schema_path`: TOML schema file path
 - `song_library.cache_directory`: normalized song cache output
+
+Key keyboard/gameplay settings:
+
+- `keyboard.layout`: keyboard profile used for generated bindings (`ansi104`)
+- `keyboard.use_layout_default_bindings`: generate broad non-shift bindings from the profile
+- `gameplay.transpose_song_to_fit_bindings`: auto-octave-shift selected songs to maximize playable coverage
+- `gameplay.warn_on_missing_song_notes`: show missing-note diagnostics in selected song pane/activity log
+- `gameplay.optimize_bindings_for_song`: remap high-usage notes of current song to ergonomic keys
 
 Example profile:
 
@@ -153,8 +161,8 @@ Symfose treats resource folders as loader inputs and normalizes source files int
 - MIDI source songs: `res/assets/midi`
 - Cache root: `.cache/songs`
 - Cache layout:
-  - `.cache/songs/v1/toml/*.toml`
-  - `.cache/songs/v1/midi/*.toml`
+  - `.cache/songs/v2/toml/*.toml`
+  - `.cache/songs/v2/midi/*.toml`
 
 On startup, source files are fingerprinted (mtime + size). If unchanged, Symfose loads the cached normalized song instead of reparsing source.
 
