@@ -125,6 +125,8 @@ struct PianoApp {
   transpose_song_to_fit_bindings: bool,
   warn_on_missing_song_notes: bool,
   optimize_bindings_for_song: bool,
+  auto_jump_pressed_key_into_view: bool,
+  keyboard_focus_note: Option<u8>,
   prepared_transpose_semitones: i8,
   missing_song_notes: Vec<u8>,
   play_mode: PlayMode,
@@ -303,6 +305,9 @@ enum Message {
   ),
   WarnOnMissingSongNotesChanged(bool),
   OptimizeBindingsForSongChanged(bool),
+  AutoJumpPressedKeyIntoViewChanged(
+    bool
+  ),
   PlayNoteFromClick(u8),
   SongSearchChanged(String),
   ApplySongTagFilter(String),
@@ -391,6 +396,11 @@ fn main() -> Result<()> {
     optimize_bindings_for_song: config
       .gameplay
       .optimize_bindings_for_song,
+    auto_jump_pressed_key_into_view:
+      config
+        .gameplay
+        .auto_jump_pressed_key_into_view,
+    keyboard_focus_note: None,
     prepared_transpose_semitones: 0,
     missing_song_notes: Vec::new(),
     config,
@@ -523,10 +533,21 @@ fn update(
       app.rebuild_song_context();
       info!(value, "optimize_bindings_for_song updated");
     }
+    | Message::AutoJumpPressedKeyIntoViewChanged(
+      value
+    ) => {
+      app.auto_jump_pressed_key_into_view =
+        value;
+      if !value {
+        app.keyboard_focus_note = None;
+      }
+      info!(value, "auto_jump_pressed_key_into_view updated");
+    }
     | Message::PlayNoteFromClick(
       midi_note
     ) => {
       app.flash_note(midi_note);
+      app.set_focus_note(midi_note);
       let play_out_loud = app
         .process_note_input(midi_note);
       if play_out_loud {
@@ -696,6 +717,7 @@ fn handle_runtime_event(
           .held_notes
           .insert(midi_note);
         app.flash_note(midi_note);
+        app.set_focus_note(midi_note);
 
         let play_out_loud = app
           .process_note_input(
@@ -946,6 +968,19 @@ fn controls_panel(
     .on_toggle(
       Message::OptimizeBindingsForSongChanged
     )
+  )
+  .push(
+    toggler(
+      app
+        .auto_jump_pressed_key_into_view
+    )
+    .label(
+      "Auto-jump piano view to \
+       played key"
+    )
+    .on_toggle(
+      Message::AutoJumpPressedKeyIntoViewChanged
+    )
   );
 
   if app.play_mode == PlayMode::Tutorial
@@ -1121,88 +1156,137 @@ fn song_timeline_panel(
     .map_or(0.0, |playback| {
       playback.cursor_seconds
     });
+  let units_per_line = app
+    .config
+    .gameplay
+    .song_lane_units_per_line
+    .max(8)
+    as usize;
+  let unit_width = app
+    .config
+    .gameplay
+    .song_lane_unit_width_px
+    .clamp(12.0, 120.0);
+  let tile_height = app
+    .config
+    .gameplay
+    .song_lane_tile_height_px
+    .clamp(20.0, 140.0);
 
-  let mut chips = row!().spacing(6);
+  let mut lines =
+    Vec::<Vec<(usize, usize)>>::new();
+  let mut current_line =
+    Vec::<(usize, usize)>::new();
+  let mut current_units = 0usize;
 
   for (index, event) in
     prepared.events.iter().enumerate()
   {
-    let width =
-      (event.duration_seconds * 120.0)
-        .clamp(64.0, 220.0);
+    let event_units =
+      event.notes.len().max(1);
+    if !current_line.is_empty()
+      && current_units + event_units
+        > units_per_line
+    {
+      lines.push(current_line);
+      current_line = Vec::new();
+      current_units = 0;
+    }
 
-    let notes = event
-      .notes
-      .iter()
-      .map(|note| {
-        app.binding_label_for_song_note(
-          *note
-        )
-      })
-      .collect::<Vec<_>>()
-      .join(" ");
-
-    let is_current = app
-      .playback
-      .as_ref()
-      .is_some_and(|state| {
-        match state.mode {
-          | PlayMode::Tutorial => {
-            state.tutorial_event_index
-              == index
-          }
-          | PlayMode::Timer
-          | PlayMode::Autoplay => {
-            event.at_seconds <= cursor
-              && cursor
-                < event.at_seconds
-                  + event
-                    .duration_seconds
-                  + 0.08
-          }
-        }
-      });
-
-    let is_past = event.at_seconds
-      + event.duration_seconds
-      < cursor;
-
-    let tile_style =
-      timeline_tile_style(
-        is_current, is_past
-      );
-
-    chips = chips.push(
-      container(
-        column![
-          text(notes).size(22),
-          text(format!(
-            "{:.2}s",
-            event.at_seconds
-          ))
-          .size(12),
-        ]
-        .spacing(2)
-      )
-      .width(width)
-      .padding(6)
-      .style(move |_| tile_style)
-    );
+    current_line
+      .push((index, event_units));
+    current_units += event_units;
   }
 
-  let roll = scrollable(
-    container(chips)
-      .width(Length::Shrink)
-  )
-  .horizontal()
-  .height(160)
-  .width(Length::Fill);
+  if !current_line.is_empty() {
+    lines.push(current_line);
+  }
+
+  let mut rows = column!().spacing(6);
+  for (line_index, line_events) in
+    lines.iter().enumerate()
+  {
+    let mut row_view = row![
+      container(text(format!(
+        "{:>2}",
+        line_index + 1
+      )))
+      .width(28)
+      .center_y(Length::Shrink)
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+
+    for (event_index, event_units) in
+      line_events
+    {
+      let event =
+        &prepared.events[*event_index];
+      let notes = event
+        .notes
+        .iter()
+        .map(|note| {
+          app.binding_label_for_song_note(
+            *note
+          )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+      let is_current = app
+        .playback
+        .as_ref()
+        .is_some_and(|state| {
+          match state.mode {
+            | PlayMode::Tutorial => {
+              state.tutorial_event_index
+                == *event_index
+            }
+            | PlayMode::Timer
+            | PlayMode::Autoplay => {
+              event.at_seconds <= cursor
+                && cursor
+                  < event.at_seconds
+                    + event
+                      .duration_seconds
+                    + 0.08
+            }
+          }
+        });
+
+      let is_past = event.at_seconds
+        + event.duration_seconds
+        < cursor;
+      let tile_style =
+        timeline_tile_style(
+          is_current, is_past
+        );
+
+      row_view = row_view.push(
+        container(text(notes).size(18))
+          .width(
+            unit_width
+              * (*event_units as f32)
+          )
+          .height(tile_height)
+          .padding([4, 6])
+          .center_y(tile_height)
+          .style(move |_| tile_style)
+      );
+    }
+
+    rows = rows.push(row_view);
+  }
+
+  let roll = scrollable(rows)
+    .height(220)
+    .width(Length::Fill);
 
   container(
     column![
       text(
-        "Song Keys + Timing \
-         (virtual-piano style lane)"
+        "Song Keys + Timing (wrapped \
+         lane)"
       )
       .size(16),
       roll,
@@ -1879,14 +1963,14 @@ impl PianoApp {
   fn keyboard_note_range(
     &self
   ) -> (u8, u8) {
-    let min_note = self
+    let bound_min = self
       .bindings
       .note_to_chords
       .keys()
       .next()
       .copied()
       .unwrap_or(60);
-    let max_note = self
+    let bound_max = self
       .bindings
       .note_to_chords
       .keys()
@@ -1894,7 +1978,77 @@ impl PianoApp {
       .copied()
       .unwrap_or(76);
 
+    if !self
+      .auto_jump_pressed_key_into_view
+    {
+      return (bound_min, bound_max);
+    }
+
+    let Some(focus_note) =
+      self.keyboard_focus_note
+    else {
+      return (bound_min, bound_max);
+    };
+
+    let visible_white_keys = self
+      .config
+      .gameplay
+      .piano_visible_white_keys
+      .max(8)
+      as usize;
+    let half = visible_white_keys / 2;
+
+    let mut min_note = focus_note;
+    let mut white_before = 0usize;
+    while min_note > bound_min
+      && white_before < half
+    {
+      min_note =
+        min_note.saturating_sub(1);
+      if is_white_key(min_note) {
+        white_before += 1;
+      }
+    }
+
+    let mut max_note = min_note;
+    let mut white_total = usize::from(
+      is_white_key(min_note)
+    );
+    while max_note < bound_max
+      && white_total
+        < visible_white_keys
+    {
+      max_note =
+        max_note.saturating_add(1);
+      if is_white_key(max_note) {
+        white_total += 1;
+      }
+    }
+
+    while min_note > bound_min
+      && white_total
+        < visible_white_keys
+    {
+      min_note =
+        min_note.saturating_sub(1);
+      if is_white_key(min_note) {
+        white_total += 1;
+      }
+    }
+
     (min_note, max_note)
+  }
+
+  fn set_focus_note(
+    &mut self,
+    note: u8
+  ) {
+    if self
+      .auto_jump_pressed_key_into_view
+    {
+      self.keyboard_focus_note =
+        Some(note);
+    }
   }
 
   fn primary_binding_label(
@@ -1918,14 +2072,10 @@ impl PianoApp {
     &self,
     note: u8
   ) -> Option<u8> {
-    let shifted = i16::from(note)
-      + i16::from(
-        self
-          .prepared_transpose_semitones
-      );
-    (0..=127)
-      .contains(&shifted)
-      .then_some(shifted as u8)
+    key_from_song_input(
+      note,
+      self.prepared_transpose_semitones
+    )
   }
 
   fn binding_label_for_song_note(
@@ -2507,8 +2657,10 @@ impl PianoApp {
         self.song_input_note(*midi_note)
       {
         self.flash_note(input_note);
+        self.set_focus_note(input_note);
       } else {
         self.flash_note(*midi_note);
+        self.set_focus_note(*midi_note);
       }
     }
   }
@@ -2703,16 +2855,6 @@ fn apply_song_ergonomic_bindings(
     }
   );
 
-  let mut left_pool =
-    ergonomic_left_keys(layout);
-  let mut right_pool =
-    ergonomic_right_keys(layout);
-  if left_pool.is_empty()
-    && right_pool.is_empty()
-  {
-    return;
-  }
-
   let song_notes = ranked_notes
     .iter()
     .map(|(note, _)| *note)
@@ -2729,19 +2871,21 @@ fn apply_song_ergonomic_bindings(
     })
     .collect::<HashMap<_, _>>();
 
-  let mut keys_in_use = next_map
+  let mut available_keys =
+    ergonomic_key_priority(layout);
+  let already_used = next_map
     .keys()
     .map(|chord| chord.to_string())
     .collect::<HashSet<_>>();
-  left_pool.retain(|key| {
-    !keys_in_use.contains(key)
+  available_keys.retain(|key| {
+    !already_used.contains(key)
   });
-  right_pool.retain(|key| {
-    !keys_in_use.contains(key)
-  });
+  if available_keys.is_empty() {
+    return;
+  }
 
-  let mut assigned_side =
-    HashMap::<u8, bool>::new();
+  let mut assigned_key =
+    HashMap::<u8, String>::new();
   let median_note = ranked_notes
     .iter()
     .map(|(note, _)| *note as f32)
@@ -2749,84 +2893,114 @@ fn apply_song_ergonomic_bindings(
     / ranked_notes.len() as f32;
 
   for (note, score) in &ranked_notes {
-    let mut same_left_penalty = 0usize;
-    let mut same_right_penalty = 0usize;
-    for (other, on_left) in
-      &assigned_side
+    let mut best: Option<(usize, i64)> =
+      None;
+
+    for (index, candidate_key) in
+      available_keys.iter().enumerate()
     {
-      let pair = if note < other {
-        (*note, *other)
-      } else {
-        (*other, *note)
-      };
-      let weight = cooccur
-        .get(&pair)
-        .copied()
-        .unwrap_or(0);
-      if *on_left {
-        same_left_penalty += weight;
-      } else {
-        same_right_penalty += weight;
+      let mut cost = (index as i64) * 6;
+
+      if let Some((is_left, _)) =
+        ergonomic_key_meta(
+          candidate_key
+        )
+      {
+        let lower_note =
+          (*note as f32) <= median_note;
+        if lower_note != is_left {
+          cost += 20;
+        }
+      }
+
+      for (other_note, other_key) in
+        &assigned_key
+      {
+        let pair = if note < other_note
+        {
+          (*note, *other_note)
+        } else {
+          (*other_note, *note)
+        };
+        let weight = cooccur
+          .get(&pair)
+          .copied()
+          .unwrap_or(0)
+          as i64;
+        if weight == 0 {
+          continue;
+        }
+
+        let candidate_meta =
+          ergonomic_key_meta(
+            candidate_key
+          );
+        let other_meta =
+          ergonomic_key_meta(other_key);
+
+        match (
+          candidate_meta,
+          other_meta
+        ) {
+          | (
+            Some((
+              cand_left,
+              cand_finger
+            )),
+            Some((
+              other_left,
+              other_finger
+            ))
+          ) => {
+            if cand_finger
+              == other_finger
+            {
+              cost += 10_000 * weight;
+            } else if cand_left
+              == other_left
+            {
+              cost += 700 * weight;
+            } else {
+              cost -= 80 * weight;
+            }
+          }
+          | _ => {
+            cost += 120 * weight;
+          }
+        }
+      }
+
+      match best {
+        | Some((_, best_cost))
+          if cost >= best_cost => {}
+        | _ => {
+          best = Some((index, cost));
+        }
       }
     }
 
-    let prefer_left_by_pitch =
-      (*note as f32) <= median_note;
-    let choose_left =
-      if same_left_penalty
-        != same_right_penalty
-      {
-        same_left_penalty
-          < same_right_penalty
-      } else {
-        let left_open = left_pool.len();
-        let right_open =
-          right_pool.len();
-        if left_open != right_open {
-          left_open > right_open
-        } else {
-          prefer_left_by_pitch
-        }
-      };
-
-    let key = if choose_left {
-      take_first_available(
-        &mut left_pool
-      )
-      .or_else(|| {
-        take_first_available(
-          &mut right_pool
-        )
-      })
-    } else {
-      take_first_available(
-        &mut right_pool
-      )
-      .or_else(|| {
-        take_first_available(
-          &mut left_pool
-        )
-      })
-    };
-
-    let Some(key) = key else {
+    let Some((chosen_index, _)) = best
+    else {
       continue;
     };
+    let key = available_keys
+      .remove(chosen_index);
 
     let Ok(chord) =
       crate::input::parse_chord(&key)
     else {
       continue;
     };
-    keys_in_use.insert(key);
     next_map.insert(chord, *note);
-    assigned_side
-      .insert(*note, choose_left);
+    assigned_key.insert(*note, key);
 
     trace!(
       midi_note = note,
       score,
-      choose_left,
+      mapped_key = assigned_key
+        .get(note)
+        .cloned()
+        .unwrap_or_default(),
       "song ergonomic binding assigned"
     );
   }
@@ -2854,26 +3028,33 @@ fn apply_song_ergonomic_bindings(
     song_notes = song_notes.len(),
     mapped_notes =
       bindings.note_to_chords.len(),
+    assigned_song_notes =
+      assigned_key.len(),
     "applied ergonomic bindings for \
      selected song"
   );
 }
 
-fn ergonomic_left_keys(
+fn ergonomic_key_priority(
   layout: KeyboardLayout
 ) -> Vec<String> {
   match layout {
     | KeyboardLayout::Ansi104 => {
       vec![
-        // Home row first.
-        "f", "d", "s", "a",
-        // Near home (top + bottom).
-        "g", "r", "e", "w", "q", "v",
-        "c", "x", "z", "t", "b",
-        // Punctuation and far reach.
-        "`", "[",
+        // Home row.
+        "f", "j", "d", "k", "s", "l",
+        "a", ";", "g", "h",
+        // Around home.
+        "r", "u", "e", "i", "w", "o",
+        "q", "p", "v", "n", "c", "m",
+        "x", ",", "z", ".", "t", "y",
+        "b", "/",
+        // Far punctuation.
+        "'", "[", "]", "\\", "`", "-",
+        "=",
         // Number row last.
-        "5", "4", "3", "2", "1",
+        "5", "6", "4", "7", "3", "8",
+        "2", "9", "1", "0",
       ]
       .into_iter()
       .map(str::to_string)
@@ -2882,37 +3063,48 @@ fn ergonomic_left_keys(
   }
 }
 
-fn ergonomic_right_keys(
-  layout: KeyboardLayout
-) -> Vec<String> {
-  match layout {
-    | KeyboardLayout::Ansi104 => {
-      vec![
-        // Home row first.
-        "j", "k", "l", ";",
-        // Near home (top + bottom).
-        "h", "u", "i", "o", "p", "n",
-        "m",
-        // Punctuation and far reach.
-        ",", ".", "/", "'", "]", "\\",
-        "-", "=",
-        // Number row last.
-        "6", "7", "8", "9", "0",
-      ]
-      .into_iter()
-      .map(str::to_string)
-      .collect()
+fn ergonomic_key_meta(
+  key: &str
+) -> Option<(bool, u8)> {
+  let (is_left, finger) = match key {
+    | "`" | "1" | "q" | "a" | "z" => {
+      (true, 1)
     }
-  }
+    | "2" | "w" | "s" | "x" => {
+      (true, 2)
+    }
+    | "3" | "e" | "d" | "c" => {
+      (true, 3)
+    }
+    | "4" | "5" | "r" | "t" | "f"
+    | "g" | "v" | "b" => (true, 4),
+    | "6" | "7" | "y" | "u" | "h"
+    | "j" | "n" | "m" => (false, 7),
+    | "8" | "i" | "k" | "," => {
+      (false, 8)
+    }
+    | "9" | "o" | "l" | "." => {
+      (false, 9)
+    }
+    | "0" | "p" | ";" | "/" | "-"
+    | "=" | "[" | "]" | "\\"
+    | "'" => (false, 10),
+    | _ => return None
+  };
+
+  Some((is_left, finger))
 }
 
-fn take_first_available(
-  pool: &mut Vec<String>
-) -> Option<String> {
-  if pool.is_empty() {
-    None
+fn key_from_song_input(
+  song_note: u8,
+  semitones: i8
+) -> Option<u8> {
+  let shifted = i16::from(song_note)
+    + i16::from(semitones);
+  if (0..=127).contains(&shifted) {
+    Some(shifted as u8)
   } else {
-    Some(pool.remove(0))
+    None
   }
 }
 
@@ -2943,12 +3135,10 @@ fn prepare_song_for_bindings(
     .expected_notes
     .iter()
     .filter_map(|entry| {
-      let shifted =
-        i16::from(entry.midi_note)
-          + i16::from(transpose);
-      (0..=127)
-        .contains(&shifted)
-        .then_some(shifted as u8)
+      key_from_song_input(
+        entry.midi_note,
+        transpose
+      )
     })
     .filter(|note| {
       !available_notes.contains(note)

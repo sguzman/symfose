@@ -44,6 +44,11 @@ use_layout_default_bindings = true
 transpose_song_to_fit_bindings = true
 warn_on_missing_song_notes = true
 optimize_bindings_for_song = false
+auto_jump_pressed_key_into_view = false
+piano_visible_white_keys = 18
+song_lane_units_per_line = 36
+song_lane_unit_width_px = 34.0
+song_lane_tile_height_px = 46.0
 
 [control_bindings]
 quit = ["esc", "ctrl+c"]

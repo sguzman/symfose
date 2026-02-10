@@ -178,7 +178,13 @@ pub struct GameplayConfig {
   pub transpose_song_to_fit_bindings:
     bool,
   pub warn_on_missing_song_notes: bool,
-  pub optimize_bindings_for_song: bool
+  pub optimize_bindings_for_song: bool,
+  pub auto_jump_pressed_key_into_view:
+    bool,
+  pub piano_visible_white_keys: u16,
+  pub song_lane_units_per_line: u16,
+  pub song_lane_unit_width_px: f32,
+  pub song_lane_tile_height_px: f32
 }
 
 impl Default for GameplayConfig {
@@ -189,7 +195,17 @@ impl Default for GameplayConfig {
       warn_on_missing_song_notes:
         true,
       optimize_bindings_for_song:
-        false
+        false,
+      auto_jump_pressed_key_into_view:
+        false,
+      piano_visible_white_keys:
+        18,
+      song_lane_units_per_line:
+        36,
+      song_lane_unit_width_px:
+        34.0,
+      song_lane_tile_height_px:
+        46.0
     }
   }
 }
@@ -614,6 +630,52 @@ fn validate_config(
     bail!(
       "song_library.cache_directory \
        cannot be empty"
+    );
+  }
+
+  if !(8..=44).contains(
+    &config
+      .gameplay
+      .piano_visible_white_keys
+  ) {
+    bail!(
+      "gameplay.piano_visible_white_\
+       keys must be in range 8..=44"
+    );
+  }
+
+  if !(8..=200).contains(
+    &config
+      .gameplay
+      .song_lane_units_per_line
+  ) {
+    bail!(
+      "gameplay.song_lane_units_per_\
+       line must be in range 8..=200"
+    );
+  }
+
+  if !(12.0..=120.0).contains(
+    &config
+      .gameplay
+      .song_lane_unit_width_px
+  ) {
+    bail!(
+      "gameplay.song_lane_unit_\
+       width_px must be in range \
+       12.0..=120.0"
+    );
+  }
+
+  if !(20.0..=140.0).contains(
+    &config
+      .gameplay
+      .song_lane_tile_height_px
+  ) {
+    bail!(
+      "gameplay.song_lane_tile_\
+       height_px must be in range \
+       20.0..=140.0"
     );
   }
 
