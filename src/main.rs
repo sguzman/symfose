@@ -567,7 +567,11 @@ fn update(
       let play_out_loud = app
         .process_note_input(midi_note);
       if play_out_loud {
-        app.audio.play_note(midi_note);
+        app.audio.play_note(
+          app.manual_playback_note(
+            midi_note
+          )
+        );
       }
 
       let line = format!(
@@ -740,9 +744,11 @@ fn handle_runtime_event(
             midi_note
           );
         if play_out_loud {
-          app
-            .audio
-            .play_note(midi_note);
+          app.audio.play_note(
+            app.manual_playback_note(
+              midi_note
+            )
+          );
         }
 
         let label = format!(
@@ -2184,6 +2190,35 @@ impl PianoApp {
     }
   }
 
+  fn manual_playback_note(
+    &self,
+    input_note: u8
+  ) -> u8 {
+    if self
+      .playback
+      .as_ref()
+      .is_some_and(|state| {
+        matches!(
+          state.mode,
+          PlayMode::Tutorial
+            | PlayMode::Timer
+        )
+      })
+    {
+      let shifted = i16::from(
+        input_note
+      ) - i16::from(
+        self
+          .prepared_transpose_semitones
+      );
+      if (0..=127).contains(&shifted) {
+        return shifted as u8;
+      }
+    }
+
+    input_note
+  }
+
   fn primary_binding_label(
     &self,
     note: u8
@@ -2258,6 +2293,11 @@ impl PianoApp {
                 self.song_input_note(
                   *note
                 )
+              })
+              .filter(|note| {
+                !playback
+                  .tutorial_matched
+                  .contains(note)
               })
           );
         }
