@@ -7,7 +7,7 @@ Bundled by default:
 - `res/soundfonts/piano.sf2` (TimGM6mb)
 - license/attribution: `res/soundfonts/piano.sf2.LICENSE`
 
-If configured path is missing, Symposium also checks common Linux system paths:
+If configured path is missing, Symfose also checks common Linux system paths:
 
 - `/usr/share/sounds/sf2/FluidR3_GM.sf2`
 - `/usr/share/sounds/sf2/TimGM6mb.sf2`

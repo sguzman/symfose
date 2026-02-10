@@ -13,7 +13,7 @@ use serde::{
 };
 
 pub const DEFAULT_CONFIG_PATH: &str =
-  "config/symposium.toml";
+  "config/symfose.toml";
 
 #[derive(
   Debug, Clone, Serialize, Deserialize,
@@ -78,7 +78,7 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
   fn default() -> Self {
     Self {
-      level:     "symposium=debug,info"
+      level:     "symfose=debug,info"
         .to_string(),
       directory: "logs".to_string()
     }

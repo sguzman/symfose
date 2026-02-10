@@ -1,12 +1,12 @@
-# Symposium
+# Symfose
 
-Symposium is a Rust desktop app for playing virtual instruments from your keyboard, starting with piano.
+Symfose is a Rust desktop app for playing virtual instruments from your keyboard, starting with piano.
 
 It is inspired by browser virtual pianos, but aimed at structured practice and performance scoring.
 
 ## Project Ambition
 
-Symposium is being built to support:
+Symfose is being built to support:
 
 - real-time instrument play from configurable keyboard mappings
 - playable song charts with tempo-aware timing
@@ -43,7 +43,7 @@ cargo run --release
 To use a custom config:
 
 ```bash
-SYMPOSIUM_CONFIG=path/to/symposium.toml cargo run --release
+SYMFOSE_CONFIG=path/to/symfose.toml cargo run --release
 ```
 
 ## SoundFont Setup
@@ -53,7 +53,7 @@ Bundled by default:
 - `res/soundfonts/piano.sf2`
 - license/attribution: `res/soundfonts/piano.sf2.LICENSE`
 
-If this file is missing, Symposium tries common Linux paths:
+If this file is missing, Symfose tries common Linux paths:
 
 - `/usr/share/sounds/sf2/FluidR3_GM.sf2`
 - `/usr/share/sounds/sf2/TimGM6mb.sf2`
@@ -75,7 +75,7 @@ You can replace the bundled file with any compatible SF2 and adjust bank/preset 
 
 Main runtime config:
 
-- `config/symposium.toml`
+- `config/symfose.toml`
 
 Key audio settings:
 
@@ -130,7 +130,7 @@ Song files include:
 - `src/input.rs`: key chord parsing and normalized bindings
 - `src/config.rs`: config model, defaults, validation, load/create
 - `src/songs.rs`: song model + loader/validator
-- `config/symposium.toml`: runtime configuration
+- `config/symfose.toml`: runtime configuration
 - `res/songs/`: song data + schema
 - `res/soundfonts/`: local SoundFont assets
 

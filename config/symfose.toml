@@ -2,7 +2,7 @@
 print_unmapped_keys = false
 
 [logging]
-level = "symposium=debug,info"
+level = "symfose=debug,info"
 directory = "logs"
 
 [audio]

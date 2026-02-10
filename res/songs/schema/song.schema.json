@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://symposium.local/schema/song.schema.json",
-  "title": "Symposium Song",
-  "description": "Schema for song arrangement files used by Symposium.",
+  "$id": "https://symfose.local/schema/song.schema.json",
+  "title": "Symfose Song",
+  "description": "Schema for song arrangement files used by Symfose.",
   "type": "object",
   "required": ["version", "meta", "events"],
   "properties": {

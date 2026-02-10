@@ -307,7 +307,7 @@ fn main() -> Result<()> {
   let _log_guard =
     init_tracing(&config)?;
 
-  info!(config_path = %config_path.display(), "booting Symposium GUI");
+  info!(config_path = %config_path.display(), "booting Symfose GUI");
 
   let bindings =
     compile_runtime_bindings(&config)?;
@@ -663,7 +663,7 @@ fn view(
 ) -> Element<'_, Message> {
   let header = container(
     column![
-      text("Symposium Virtual Piano")
+      text("Symfose Virtual Piano")
         .size(34),
       text(
         "Virtual piano workflow with \
@@ -1381,8 +1381,7 @@ fn map_event(
 fn app_title(
   _state: &PianoApp
 ) -> String {
-  "Symposium - Virtual Piano"
-    .to_string()
+  "Symfose - Virtual Piano".to_string()
 }
 
 fn app_theme(
@@ -2060,7 +2059,7 @@ impl PianoApp {
 }
 
 fn configured_config_path() -> PathBuf {
-  env::var("SYMPOSIUM_CONFIG")
+  env::var("SYMFOSE_CONFIG")
     .map(PathBuf::from)
     .unwrap_or_else(|_| {
       PathBuf::from(DEFAULT_CONFIG_PATH)
@@ -2091,7 +2090,7 @@ fn init_tracing(
   let file_appender =
     tracing_appender::rolling::daily(
       &config.logging.directory,
-      "symposium"
+      "symfose"
     );
   let (file_writer, guard) =
     tracing_appender::non_blocking(
