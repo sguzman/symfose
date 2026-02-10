@@ -834,10 +834,69 @@ fn controls_panel(
   ]
   .spacing(4);
 
+  let mode_picker = pick_list(
+    PlayMode::ALL,
+    Some(app.play_mode),
+    Message::PlayModeSelected
+  )
+  .placeholder("Mode")
+  .width(Length::Fill);
+
+  let playback_controls = row![
+    button(text("Start"))
+      .on_press(Message::StartPlayback),
+    button(text("Restart")).on_press(
+      Message::RestartPlayback
+    ),
+    button(text("Stop"))
+      .on_press(Message::StopPlayback),
+  ]
+  .spacing(6);
+
+  let mut more_options = column![
+    text("More Options").size(22)
+  ]
+  .spacing(6)
+  .push(mode_picker)
+  .push(playback_controls);
+
+  if app.play_mode == PlayMode::Tutorial
+  {
+    more_options = more_options
+      .push(
+        toggler(
+          app
+            .tutorial_options
+            .only_advance_on_correct_note
+        )
+        .label(
+          "Only advance on correct \
+           note"
+        )
+        .on_toggle(
+          Message::TutorialAdvanceOnlyCorrectChanged
+        )
+      )
+      .push(
+        toggler(
+          app
+            .tutorial_options
+            .play_bad_notes_out_loud
+        )
+        .label(
+          "Play bad notes out loud"
+        )
+        .on_toggle(
+          Message::TutorialPlayBadNotesChanged
+        )
+      );
+  }
+
   container(
     scrollable(
       column![
         controls,
+        more_options,
         binding_rows,
         activity_rows
       ]
@@ -1270,64 +1329,6 @@ fn songs_panel(
     }
   }
 
-  let mode_picker = pick_list(
-    PlayMode::ALL,
-    Some(app.play_mode),
-    Message::PlayModeSelected
-  )
-  .placeholder("Mode")
-  .width(Length::Fill);
-
-  let playback_controls = row![
-    button(text("Start"))
-      .on_press(Message::StartPlayback),
-    button(text("Restart")).on_press(
-      Message::RestartPlayback
-    ),
-    button(text("Stop"))
-      .on_press(Message::StopPlayback),
-  ]
-  .spacing(6);
-
-  let mut mode_specific = column![
-    text("Mode Options").size(18)
-  ]
-  .spacing(6)
-  .push(mode_picker)
-  .push(playback_controls);
-
-  if app.play_mode == PlayMode::Tutorial
-  {
-    mode_specific = mode_specific
-      .push(
-        toggler(
-          app
-            .tutorial_options
-            .only_advance_on_correct_note
-        )
-        .label(
-          "Only advance on correct \
-           note"
-        )
-        .on_toggle(
-          Message::TutorialAdvanceOnlyCorrectChanged
-        )
-      )
-      .push(
-        toggler(
-          app
-            .tutorial_options
-            .play_bad_notes_out_loud
-        )
-        .label(
-          "Play bad notes out loud"
-        )
-        .on_toggle(
-          Message::TutorialPlayBadNotesChanged
-        )
-      );
-  }
-
   let details =
     selected_song_details(app);
 
@@ -1336,14 +1337,8 @@ fn songs_panel(
       .padding(10)
       .style(container::rounded_box);
   let search_pane = container(
-    scrollable(
-      column![
-        songs_column,
-        mode_specific
-      ]
-      .spacing(14)
-    )
-    .height(Length::Fill)
+    scrollable(songs_column)
+      .height(Length::Fill)
   )
   .padding(10)
   .style(container::rounded_box);
