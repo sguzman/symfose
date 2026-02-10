@@ -1826,17 +1826,36 @@ impl PianoApp {
         }
       };
 
-    if self.optimize_bindings_for_song {
-      if let Some(index) =
-        self.selected_song
+    let mut forced_transpose = 0i8;
+    if let Some(index) =
+      self.selected_song
+    {
+      if let Some(song) =
+        self.songs.get(index)
       {
-        if let Some(song) =
-          self.songs.get(index)
+        if self
+          .transpose_song_to_fit_bindings
+        {
+          let available_notes = bindings
+            .note_to_chords
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+          forced_transpose =
+            choose_transpose_for_fit(
+              &song.song,
+              &available_notes
+            );
+        }
+
+        if self
+          .optimize_bindings_for_song
         {
           apply_song_ergonomic_bindings(
             &mut bindings,
             &song.song,
-            self.config.keyboard.layout
+            self.config.keyboard.layout,
+            forced_transpose
           );
         }
       }
@@ -1857,7 +1876,8 @@ impl PianoApp {
               &loaded.song,
               &self.bindings,
               self
-                .transpose_song_to_fit_bindings
+                .transpose_song_to_fit_bindings,
+              Some(forced_transpose)
             )
           }
         );
@@ -2801,7 +2821,8 @@ fn compile_runtime_bindings(
 fn apply_song_ergonomic_bindings(
   bindings: &mut RuntimeBindings,
   song: &SongFile,
-  layout: KeyboardLayout
+  layout: KeyboardLayout,
+  transpose_semitones: i8
 ) {
   let mut note_scores =
     HashMap::<u8, usize>::new();
@@ -2809,7 +2830,16 @@ fn apply_song_ergonomic_bindings(
     HashMap::<(u8, u8), usize>::new();
 
   for event in &song.events {
-    let mut notes = event.notes.clone();
+    let mut notes = event
+      .notes
+      .iter()
+      .filter_map(|note| {
+        key_from_song_input(
+          *note,
+          transpose_semitones
+        )
+      })
+      .collect::<Vec<_>>();
     notes.sort_unstable();
     notes.dedup();
     if notes.is_empty() {
@@ -2859,24 +2889,24 @@ fn apply_song_ergonomic_bindings(
     .iter()
     .map(|(note, _)| *note)
     .collect::<HashSet<_>>();
-  let mut next_map = bindings
-    .note_bindings
-    .iter()
-    .filter_map(|(chord, note)| {
-      (!song_notes.contains(note))
-        .then_some((
-          chord.clone(),
-          *note
-        ))
-    })
-    .collect::<HashMap<_, _>>();
+  let mut next_map = HashMap::new();
 
   let mut available_keys =
     ergonomic_key_priority(layout);
-  let already_used = next_map
-    .keys()
-    .map(|chord| chord.to_string())
-    .collect::<HashSet<_>>();
+  if song_notes.len()
+    > available_keys.len()
+  {
+    let shifted =
+      ergonomic_key_priority(layout)
+        .into_iter()
+        .map(|key| {
+          format!("shift+{key}")
+        })
+        .collect::<Vec<_>>();
+    available_keys.extend(shifted);
+  }
+  let already_used =
+    HashSet::<String>::new();
   available_keys.retain(|key| {
     !already_used.contains(key)
   });
@@ -3066,7 +3096,12 @@ fn ergonomic_key_priority(
 fn ergonomic_key_meta(
   key: &str
 ) -> Option<(bool, u8)> {
-  let (is_left, finger) = match key {
+  let base_key = key
+    .rsplit('+')
+    .next()
+    .unwrap_or(key);
+  let (is_left, finger) = match base_key
+  {
     | "`" | "1" | "q" | "a" | "z" => {
       (true, 1)
     }
@@ -3111,7 +3146,8 @@ fn key_from_song_input(
 fn prepare_song_for_bindings(
   source_song: &SongFile,
   bindings: &RuntimeBindings,
-  transpose_to_fit: bool
+  transpose_to_fit: bool,
+  forced_transpose: Option<i8>
 ) -> (Option<PreparedSong>, i8, Vec<u8>)
 {
   let available_notes = bindings
@@ -3120,14 +3156,17 @@ fn prepare_song_for_bindings(
     .copied()
     .collect::<HashSet<_>>();
 
-  let transpose = if transpose_to_fit {
-    choose_transpose_for_fit(
-      source_song,
-      &available_notes
-    )
-  } else {
-    0
-  };
+  let transpose = forced_transpose
+    .unwrap_or_else(|| {
+      if transpose_to_fit {
+        choose_transpose_for_fit(
+          source_song,
+          &available_notes
+        )
+      } else {
+        0
+      }
+    });
 
   let prepared =
     prepare_song(source_song);
