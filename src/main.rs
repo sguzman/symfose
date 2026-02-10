@@ -1237,23 +1237,25 @@ fn song_timeline_panel(
     lines.push(current_line);
   }
 
-  let active_event_index =
-    app.playback.as_ref().and_then(
-      |playback| {
-        match playback.mode {
-          | PlayMode::Tutorial => {
-            Some(
-              playback
-                .tutorial_event_index
-                .min(
-                  prepared
-                    .events
-                    .len()
-                    .saturating_sub(1)
-                )
-            )
-          }
-          | PlayMode::Timer => prepared
+  let active_event_index = app
+    .playback
+    .as_ref()
+    .and_then(|playback| {
+      match playback.mode {
+        | PlayMode::Tutorial => {
+          Some(
+            playback
+              .tutorial_event_index
+              .min(
+                prepared
+                  .events
+                  .len()
+                  .saturating_sub(1)
+              )
+          )
+        }
+        | PlayMode::Timer => {
+          prepared
             .events
             .iter()
             .position(|event| {
@@ -1272,11 +1274,29 @@ fn song_timeline_panel(
                   event.at_seconds
                     <= cursor
                 })
-            }),
-          | PlayMode::Autoplay => None
+            })
+        }
+        | PlayMode::Autoplay => {
+          if playback.next_event_index
+            == 0
+          {
+            Some(0)
+          } else {
+            Some(
+              playback
+                .next_event_index
+                .saturating_sub(1)
+                .min(
+                  prepared
+                    .events
+                    .len()
+                    .saturating_sub(1)
+                )
+            )
+          }
         }
       }
-    );
+    });
 
   let mut event_to_line =
     vec![0usize; prepared.events.len()];
@@ -1301,6 +1321,7 @@ fn song_timeline_panel(
             playback.mode,
             PlayMode::Timer
               | PlayMode::Tutorial
+              | PlayMode::Autoplay
           )
         })
     {
@@ -2285,15 +2306,17 @@ impl PianoApp {
               .tutorial_event_index
           )
         {
+          let expected = event
+            .notes
+            .iter()
+            .filter_map(|note| {
+              self
+                .song_input_note(*note)
+            })
+            .collect::<HashSet<_>>();
           notes.extend(
-            event
-              .notes
-              .iter()
-              .filter_map(|note| {
-                self.song_input_note(
-                  *note
-                )
-              })
+            expected
+              .into_iter()
               .filter(|note| {
                 !playback
                   .tutorial_matched
@@ -2302,8 +2325,7 @@ impl PianoApp {
           );
         }
       }
-      | PlayMode::Timer
-      | PlayMode::Autoplay => {
+      | PlayMode::Timer => {
         let cursor =
           playback.cursor_seconds;
         for event in &prepared.events {
@@ -2324,6 +2346,7 @@ impl PianoApp {
           }
         }
       }
+      | PlayMode::Autoplay => {}
     }
 
     notes
