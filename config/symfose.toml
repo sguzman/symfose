@@ -165,6 +165,7 @@ transpose_song_to_fit_bindings = true
 warn_on_missing_song_notes = true
 optimize_bindings_for_song = false
 auto_jump_pressed_key_into_view = false
+auto_scroll_song_lane_follow_playback = true
 piano_visible_white_keys = 18
 song_lane_units_per_line = 16
 song_lane_unit_width_px = 25.0

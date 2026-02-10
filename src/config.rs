@@ -181,6 +181,8 @@ pub struct GameplayConfig {
   pub optimize_bindings_for_song: bool,
   pub auto_jump_pressed_key_into_view:
     bool,
+  pub auto_scroll_song_lane_follow_playback:
+    bool,
   pub piano_visible_white_keys: u16,
   pub song_lane_units_per_line: u16,
   pub song_lane_unit_width_px: f32,
@@ -198,6 +200,8 @@ impl Default for GameplayConfig {
         false,
       auto_jump_pressed_key_into_view:
         false,
+      auto_scroll_song_lane_follow_playback:
+        true,
       piano_visible_white_keys:
         18,
       song_lane_units_per_line:

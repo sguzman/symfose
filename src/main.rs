@@ -126,6 +126,8 @@ struct PianoApp {
   warn_on_missing_song_notes: bool,
   optimize_bindings_for_song: bool,
   auto_jump_pressed_key_into_view: bool,
+  auto_scroll_song_lane_follow_playback:
+    bool,
   keyboard_focus_note: Option<u8>,
   prepared_transpose_semitones: i8,
   missing_song_notes: Vec<u8>,
@@ -308,6 +310,9 @@ enum Message {
   AutoJumpPressedKeyIntoViewChanged(
     bool
   ),
+  AutoScrollSongLaneFollowPlaybackChanged(
+    bool
+  ),
   PlayNoteFromClick(u8),
   SongSearchChanged(String),
   ApplySongTagFilter(String),
@@ -400,6 +405,10 @@ fn main() -> Result<()> {
       config
         .gameplay
         .auto_jump_pressed_key_into_view,
+    auto_scroll_song_lane_follow_playback:
+      config
+        .gameplay
+        .auto_scroll_song_lane_follow_playback,
     keyboard_focus_note: None,
     prepared_transpose_semitones: 0,
     missing_song_notes: Vec::new(),
@@ -542,6 +551,13 @@ fn update(
         app.keyboard_focus_note = None;
       }
       info!(value, "auto_jump_pressed_key_into_view updated");
+    }
+    | Message::AutoScrollSongLaneFollowPlaybackChanged(
+      value
+    ) => {
+      app.auto_scroll_song_lane_follow_playback =
+        value;
+      info!(value, "auto_scroll_song_lane_follow_playback updated");
     }
     | Message::PlayNoteFromClick(
       midi_note
@@ -981,6 +997,19 @@ fn controls_panel(
     .on_toggle(
       Message::AutoJumpPressedKeyIntoViewChanged
     )
+  )
+  .push(
+    toggler(
+      app
+        .auto_scroll_song_lane_follow_playback
+    )
+    .label(
+      "Auto-scroll song lane with \
+       playback"
+    )
+    .on_toggle(
+      Message::AutoScrollSongLaneFollowPlaybackChanged
+    )
   );
 
   if app.play_mode == PlayMode::Tutorial
@@ -1202,10 +1231,94 @@ fn song_timeline_panel(
     lines.push(current_line);
   }
 
-  let mut rows = column!().spacing(6);
+  let active_event_index =
+    app.playback.as_ref().and_then(
+      |playback| {
+        match playback.mode {
+          | PlayMode::Tutorial => {
+            Some(
+              playback
+                .tutorial_event_index
+                .min(
+                  prepared
+                    .events
+                    .len()
+                    .saturating_sub(1)
+                )
+            )
+          }
+          | PlayMode::Timer => prepared
+            .events
+            .iter()
+            .position(|event| {
+              event.at_seconds <= cursor
+                && cursor
+                  < event.at_seconds
+                    + event
+                      .duration_seconds
+                    + 0.08
+            })
+            .or_else(|| {
+              prepared
+                .events
+                .iter()
+                .rposition(|event| {
+                  event.at_seconds
+                    <= cursor
+                })
+            }),
+          | PlayMode::Autoplay => None
+        }
+      }
+    );
+
+  let mut event_to_line =
+    vec![0usize; prepared.events.len()];
   for (line_index, line_events) in
     lines.iter().enumerate()
   {
+    for (event_index, _) in line_events
+    {
+      event_to_line[*event_index] =
+        line_index;
+    }
+  }
+
+  let (visible_start, visible_end) =
+    if app
+      .auto_scroll_song_lane_follow_playback
+      && app
+        .playback
+        .as_ref()
+        .is_some_and(|playback| {
+          matches!(
+            playback.mode,
+            PlayMode::Timer
+              | PlayMode::Tutorial
+          )
+        })
+    {
+      let focus_line = active_event_index
+        .and_then(|index| {
+          event_to_line
+            .get(index)
+            .copied()
+        })
+        .unwrap_or(0);
+      let start =
+        focus_line.saturating_sub(2);
+      let end = (start + 8).min(lines.len());
+      (start, end)
+    } else {
+      (0, lines.len())
+    };
+
+  let mut rows = column!().spacing(6);
+  for line_index in
+    visible_start..visible_end
+  {
+    let line_events =
+      &lines[line_index];
     let mut row_view = row![
       container(text(format!(
         "{:>2}",
