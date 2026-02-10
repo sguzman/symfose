@@ -38,7 +38,7 @@ use tracing::{
 
 use crate::config::SongLibraryConfig;
 
-const SONG_CACHE_VERSION: u16 = 1;
+const SONG_CACHE_VERSION: u16 = 2;
 
 #[derive(
   Debug, Clone, Serialize, Deserialize,
@@ -364,7 +364,10 @@ fn load_source_with_cache(
     | SourceKind::Midi => {
       parse_midi_song(
         &source.path,
-        &config.schema_path
+        &config.schema_path,
+        Path::new(
+          &config.midi_directory
+        )
       )?
     }
   };
@@ -751,7 +754,8 @@ fn parse_toml_song(
 
 fn parse_midi_song(
   path: &Path,
-  schema_path: &str
+  schema_path: &str,
+  midi_root: &Path
 ) -> Result<SongFile> {
   let bytes = fs::read(path)
     .with_context(|| {
@@ -944,6 +948,15 @@ fn parse_midi_song(
   let id = sanitize_song_id(file_stem);
   let title =
     humanize_song_title(file_stem);
+  let mut path_tags =
+    midi_folder_tags(path, midi_root);
+  let mut tags = vec![
+    "midi".to_string(),
+    "imported".to_string(),
+  ];
+  tags.append(&mut path_tags);
+  tags.sort();
+  tags.dedup();
 
   let mut song = SongFile {
     version: 1,
@@ -965,10 +978,7 @@ fn parse_midi_song(
       beat_unit,
       key_signature: "Unknown"
         .to_string(),
-      tags: vec![
-        "midi".to_string(),
-        "imported".to_string(),
-      ],
+      tags,
       source_url: path
         .to_string_lossy()
         .to_string(),
@@ -1206,6 +1216,57 @@ fn humanize_song_title(
   } else {
     trimmed.to_string()
   }
+}
+
+fn midi_folder_tags(
+  path: &Path,
+  midi_root: &Path
+) -> Vec<String> {
+  let mut tags = Vec::new();
+
+  let parent = path.parent();
+  let Some(parent) = parent else {
+    return tags;
+  };
+
+  let relative_parent =
+    parent.strip_prefix(midi_root).ok();
+
+  let components = relative_parent
+    .unwrap_or(parent)
+    .components();
+
+  for component in components {
+    let text = component.as_os_str();
+    let raw = text.to_string_lossy();
+    if raw.is_empty()
+      || raw == "."
+      || raw == ".."
+    {
+      continue;
+    }
+
+    let cleaned = raw
+      .chars()
+      .map(|ch| {
+        if ch.is_ascii_alphanumeric() {
+          ch.to_ascii_lowercase()
+        } else {
+          '_'
+        }
+      })
+      .collect::<String>()
+      .trim_matches('_')
+      .to_string();
+
+    if cleaned.is_empty() {
+      continue;
+    }
+
+    tags.push(cleaned);
+  }
+
+  tags
 }
 
 fn finalize_song(

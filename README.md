@@ -158,6 +158,8 @@ Symfose treats resource folders as loader inputs and normalizes source files int
 
 On startup, source files are fingerprinted (mtime + size). If unchanged, Symfose loads the cached normalized song instead of reparsing source.
 
+MIDI imports also add directory-name tags from under `res/assets/midi/` (e.g. `game-midis`, `chrono_trigger`) to make search/filtering easier when filenames repeat across folders.
+
 ## Repository Layout
 
 - `src/main.rs`: GUI state/update/view and keyboard routing
