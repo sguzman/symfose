@@ -756,6 +756,27 @@ fn validate_instrument_profile(
 
 fn default_instrument_profiles()
 -> BTreeMap<String, InstrumentProfile> {
+  fn sf2_profile(
+    preset: u8,
+    polyphony: usize,
+    gain: f32
+  ) -> InstrumentProfile {
+    InstrumentProfile::Soundfont(
+      SoundFontProfile {
+        soundfont_path:
+          "res/soundfonts/piano.sf2"
+            .to_string(),
+        bank: 0,
+        preset,
+        channel: 0,
+        maximum_polyphony: polyphony,
+        enable_reverb_and_chorus: true,
+        instrument_gain_multiplier:
+          gain
+      }
+    )
+  }
+
   let mut map = BTreeMap::new();
   map.insert(
     "piano".to_string(),
@@ -763,19 +784,47 @@ fn default_instrument_profiles()
   );
   map.insert(
     "acoustic_guitar".to_string(),
-    InstrumentProfile::Soundfont(
-      SoundFontProfile {
-        soundfont_path:
-          "res/soundfonts/piano.sf2"
-            .to_string(),
-        bank: 0,
-        preset: 24,
-        channel: 0,
-        maximum_polyphony: 96,
-        enable_reverb_and_chorus: true,
-        instrument_gain_multiplier: 1.1
-      }
-    )
+    sf2_profile(24, 96, 1.1)
+  );
+  map.insert(
+    "ocarina".to_string(),
+    sf2_profile(79, 96, 1.18)
+  );
+  map.insert(
+    "flute".to_string(),
+    sf2_profile(73, 96, 1.16)
+  );
+  map.insert(
+    "violin".to_string(),
+    sf2_profile(40, 96, 1.2)
+  );
+  map.insert(
+    "clarinet".to_string(),
+    sf2_profile(71, 96, 1.16)
+  );
+  map.insert(
+    "music_box".to_string(),
+    sf2_profile(10, 64, 1.22)
+  );
+  map.insert(
+    "banjo".to_string(),
+    sf2_profile(105, 96, 1.15)
+  );
+  map.insert(
+    "harmonica".to_string(),
+    sf2_profile(22, 96, 1.15)
+  );
+  map.insert(
+    "trumpet".to_string(),
+    sf2_profile(56, 96, 1.16)
+  );
+  map.insert(
+    "trombone".to_string(),
+    sf2_profile(57, 96, 1.16)
+  );
+  map.insert(
+    "alto_sax".to_string(),
+    sf2_profile(65, 96, 1.16)
   );
   map
 }

@@ -32,6 +32,106 @@ maximum_polyphony = 96
 enable_reverb_and_chorus = true
 instrument_gain_multiplier = 1.1
 
+[audio.instrument_profiles.ocarina]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 79
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.18
+
+[audio.instrument_profiles.flute]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 73
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.16
+
+[audio.instrument_profiles.violin]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 40
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.2
+
+[audio.instrument_profiles.clarinet]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 71
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.16
+
+[audio.instrument_profiles.music_box]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 10
+channel = 0
+maximum_polyphony = 64
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.22
+
+[audio.instrument_profiles.banjo]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 105
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.15
+
+[audio.instrument_profiles.harmonica]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 22
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.15
+
+[audio.instrument_profiles.trumpet]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 56
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.16
+
+[audio.instrument_profiles.trombone]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 57
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.16
+
+[audio.instrument_profiles.alto_sax]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 65
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.16
+
 [input]
 allow_key_repeat = false
 ignore_shift_for_char_keys = true
