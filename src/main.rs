@@ -40,6 +40,7 @@ use iced::widget::{
   space,
   stack,
   text,
+  text_input,
   toggler
 };
 use iced::{
@@ -107,21 +108,24 @@ struct RuntimeBindings {
 }
 
 struct PianoApp {
-  config:           AppConfig,
-  bindings:         RuntimeBindings,
-  songs:            Vec<LoadedSong>,
-  audio:            AudioEngine,
-  selected_song:    Option<usize>,
+  config:              AppConfig,
+  bindings:            RuntimeBindings,
+  songs:               Vec<LoadedSong>,
+  audio:               AudioEngine,
+  selected_song:       Option<usize>,
   prepared_song: Option<PreparedSong>,
-  held_notes:       HashSet<u8>,
+  held_notes:          HashSet<u8>,
   flashed_notes: HashMap<u8, Instant>,
-  activity:         Vec<String>,
-  startup_notice:   String,
-  play_mode:        PlayMode,
-  tutorial_options: TutorialOptions,
+  activity:            Vec<String>,
+  startup_notice:      String,
+  song_search_query:   String,
+  instrument_options:  Vec<String>,
+  selected_instrument: String,
+  play_mode:           PlayMode,
+  tutorial_options:    TutorialOptions,
   playback: Option<PlaybackState>,
   last_timer_score: Option<TimerScore>,
-  volume:           f32
+  volume:              f32
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +293,8 @@ enum Message {
   ),
   TutorialPlayBadNotesChanged(bool),
   PlayNoteFromClick(u8),
+  SongSearchChanged(String),
+  InstrumentSelected(String),
   Tick(Instant)
 }
 
@@ -331,6 +337,11 @@ fn main() -> Result<()> {
 
   let audio =
     AudioEngine::new(&config.audio)?;
+  let instrument_options =
+    audio.available_profiles();
+  let selected_instrument = audio
+    .active_profile_name()
+    .to_string();
 
   let selected_song =
     if songs.is_empty() {
@@ -362,6 +373,9 @@ fn main() -> Result<()> {
     selected_song,
     prepared_song,
     volume: audio.master_volume(),
+    song_search_query: String::new(),
+    instrument_options,
+    selected_instrument,
     config,
     bindings,
     songs,
@@ -484,6 +498,36 @@ fn update(
       );
       app.push_activity(line);
       info!(midi_note, note = %midi_note_name(midi_note), "piano key clicked");
+    }
+    | Message::SongSearchChanged(
+      query
+    ) => {
+      app.song_search_query = query;
+    }
+    | Message::InstrumentSelected(
+      instrument
+    ) => {
+      match app
+        .audio
+        .set_active_profile(
+          &instrument
+        )
+      {
+        | Ok(()) => {
+          app.selected_instrument =
+            instrument.clone();
+          app.push_activity(format!(
+            "Instrument switched to \
+             {instrument}"
+          ));
+        }
+        | Err(error) => {
+          app.push_activity(format!(
+            "Failed to switch \
+             instrument: {error}"
+          ));
+        }
+      }
     }
     | Message::Tick(now) => {
       app.handle_tick(now);
@@ -841,7 +885,6 @@ fn piano_panel(
       text(format!(
         "Instrument: {}",
         app
-          .config
           .audio
           .active_profile_summary()
       )),
@@ -853,6 +896,17 @@ fn piano_panel(
     .spacing(4)
     .width(Length::FillPortion(4)),
     column![
+      text("Instrument Profile"),
+      pick_list(
+        app.instrument_options.clone(),
+        Some(
+          app
+            .selected_instrument
+            .clone()
+        ),
+        Message::InstrumentSelected
+      )
+      .width(Length::Fill),
       text(format!(
         "Volume: {:.2}",
         app.volume
@@ -1168,20 +1222,33 @@ fn black_key_widget<'a>(
 fn songs_panel(
   app: &PianoApp
 ) -> Element<'_, Message> {
-  let mut songs_column =
-    column![text("Songs").size(22)]
-      .spacing(6);
+  let filtered_indices =
+    app.filtered_song_indices();
+  let mut songs_column = column![
+    text("Song Search").size(18),
+    text_input(
+      "Search title, artist, id, tag",
+      &app.song_search_query
+    )
+    .on_input(
+      Message::SongSearchChanged
+    ),
+    text(format!(
+      "Results: {} / {}",
+      filtered_indices.len(),
+      app.songs.len()
+    )),
+  ]
+  .spacing(6);
 
-  if app.songs.is_empty() {
+  if filtered_indices.is_empty() {
     songs_column =
       songs_column.push(text(
-        "No songs found in \
-         song_library directories."
+        "No songs matched your search."
       ));
   } else {
-    for (index, loaded) in
-      app.songs.iter().enumerate()
-    {
+    for index in filtered_indices {
+      let loaded = &app.songs[index];
       let selected = app.selected_song
         == Some(index);
       let marker = if selected {
@@ -1264,15 +1331,29 @@ fn songs_panel(
   let details =
     selected_song_details(app);
 
-  container(
+  let selected_pane =
+    container(details)
+      .padding(10)
+      .style(container::rounded_box);
+  let search_pane = container(
     scrollable(
       column![
         songs_column,
-        mode_specific,
-        details,
+        mode_specific
       ]
       .spacing(14)
     )
+    .height(Length::Fill)
+  )
+  .padding(10)
+  .style(container::rounded_box);
+
+  container(
+    column![
+      selected_pane,
+      search_pane,
+    ]
+    .spacing(10)
     .height(Length::Fill)
   )
   .padding(12)
@@ -1427,6 +1508,54 @@ fn app_theme(
 }
 
 impl PianoApp {
+  fn filtered_song_indices(
+    &self
+  ) -> Vec<usize> {
+    let needle = self
+      .song_search_query
+      .trim()
+      .to_ascii_lowercase();
+
+    self
+      .songs
+      .iter()
+      .enumerate()
+      .filter(|(_, loaded)| {
+        if needle.is_empty() {
+          return true;
+        }
+
+        let tags = loaded
+          .song
+          .meta
+          .tags
+          .join(" ")
+          .to_ascii_lowercase();
+
+        loaded
+          .song
+          .meta
+          .title
+          .to_ascii_lowercase()
+          .contains(&needle)
+          || loaded
+            .song
+            .meta
+            .artist
+            .to_ascii_lowercase()
+            .contains(&needle)
+          || loaded
+            .song
+            .meta
+            .id
+            .to_ascii_lowercase()
+            .contains(&needle)
+          || tags.contains(&needle)
+      })
+      .map(|(index, _)| index)
+      .collect::<Vec<_>>()
+  }
+
   fn push_activity(
     &mut self,
     line: String
@@ -1626,9 +1755,12 @@ impl PianoApp {
   }
 
   fn select_next_song(&mut self) {
-    if self.songs.is_empty() {
+    let filtered =
+      self.filtered_song_indices();
+    if filtered.is_empty() {
       self.push_activity(
-        "No songs available to select."
+        "No songs available in \
+         current search filter."
           .to_string()
       );
       return;
@@ -1637,9 +1769,18 @@ impl PianoApp {
     let next = match self.selected_song
     {
       | Some(current) => {
-        (current + 1) % self.songs.len()
+        let current_pos = filtered
+          .iter()
+          .position(|index| {
+            *index == current
+          })
+          .unwrap_or(0);
+        let next_pos = (current_pos
+          + 1)
+          % filtered.len();
+        filtered[next_pos]
       }
-      | None => 0
+      | None => filtered[0]
     };
 
     self.select_song(next);

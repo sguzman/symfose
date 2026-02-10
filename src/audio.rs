@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::{
   Path,
@@ -47,9 +48,11 @@ const COMMON_SOUNDFONT_PATHS: [&str;
 
 pub struct AudioEngine {
   stream:              OutputStream,
+  profiles: BTreeMap<
+    String,
+    LoadedSoundFontProfile
+  >,
   active_profile_name: String,
-  active_profile:
-    LoadedSoundFontProfile,
   default_volume:      f32,
   default_duration_ms: u64,
   release_duration_ms: u64
@@ -79,30 +82,41 @@ impl AudioEngine {
 
     stream.log_on_drop(false);
 
-    let (
-      profile_name,
-      profile
-    ) = config.active_profile().with_context(
-      || {
-        format!(
-          "active instrument profile '{}' \
-           not found in \
-           audio.instrument_profiles",
-          config.instrument
-        )
-      }
-    )?;
+    let mut profiles = BTreeMap::<
+      String,
+      LoadedSoundFontProfile
+    >::new();
+    for (profile_name, profile) in
+      &config.instrument_profiles
+    {
+      let loaded =
+        load_soundfont_profile(
+          profile_name,
+          profile
+        )?;
+      profiles.insert(
+        profile_name.clone(),
+        loaded
+      );
+    }
 
-    let active_profile =
-      load_soundfont_profile(
-        profile_name,
-        profile
-      )?;
+    if !profiles
+      .contains_key(&config.instrument)
+    {
+      bail!(
+        "active instrument profile \
+         '{}' not found in \
+         audio.instrument_profiles",
+        config.instrument
+      );
+    }
 
     info!(
       sample_rate = stream.config().sample_rate(),
       channels = stream.config().channel_count(),
-      profile_name,
+      profile_name =
+        %config.instrument,
+      profiles_loaded = profiles.len(),
       profile_summary = %config.active_profile_summary(),
       master_volume = config.master_volume,
       default_note_duration_ms = config.note_duration_ms,
@@ -112,9 +126,10 @@ impl AudioEngine {
 
     Ok(Self {
       stream,
-      active_profile_name: profile_name
-        .to_string(),
-      active_profile,
+      profiles,
+      active_profile_name: config
+        .instrument
+        .clone(),
       default_volume: config
         .master_volume,
       default_duration_ms: config
@@ -126,6 +141,67 @@ impl AudioEngine {
 
   pub fn master_volume(&self) -> f32 {
     self.default_volume
+  }
+
+  pub fn active_profile_name(
+    &self
+  ) -> &str {
+    &self.active_profile_name
+  }
+
+  pub fn available_profiles(
+    &self
+  ) -> Vec<String> {
+    self
+      .profiles
+      .keys()
+      .cloned()
+      .collect::<Vec<_>>()
+  }
+
+  pub fn active_profile_summary(
+    &self
+  ) -> String {
+    if let Some(profile) =
+      self.current_profile()
+    {
+      format!(
+        "{} (soundfont bank={} \
+         preset={} channel={})",
+        self.active_profile_name,
+        profile.profile.bank,
+        profile.profile.preset,
+        profile.profile.channel
+      )
+    } else {
+      format!(
+        "{} (missing profile)",
+        self.active_profile_name
+      )
+    }
+  }
+
+  pub fn set_active_profile(
+    &mut self,
+    profile_name: &str
+  ) -> Result<()> {
+    if !self
+      .profiles
+      .contains_key(profile_name)
+    {
+      bail!(
+        "unknown audio profile \
+         '{profile_name}'"
+      );
+    }
+
+    self.active_profile_name =
+      profile_name.to_string();
+    info!(
+      profile = %self.active_profile_name,
+      "active instrument profile changed",
+    );
+    Ok(())
   }
 
   pub fn set_master_volume(
@@ -203,8 +279,18 @@ impl AudioEngine {
       "rendering soundfont note",
     );
 
+    let Some(active_profile) =
+      self.current_profile()
+    else {
+      warn!(
+        profile = %self.active_profile_name,
+        "active profile missing while rendering note"
+      );
+      return;
+    };
+
     match render_soundfont_note_samples(
-      &self.active_profile,
+      active_profile,
       midi_note,
       velocity,
       duration_ms,
@@ -246,8 +332,18 @@ impl AudioEngine {
       "rendering song preview",
     );
 
+    let Some(active_profile) =
+      self.current_profile()
+    else {
+      warn!(
+        profile = %self.active_profile_name,
+        "active profile missing while rendering song"
+      );
+      return;
+    };
+
     match render_soundfont_song_samples(
-      &self.active_profile,
+      active_profile,
       song,
       sample_rate,
       self.default_volume,
@@ -284,6 +380,15 @@ impl AudioEngine {
         warn!(%error, song_id = %song.meta.id, "failed rendering song preview");
       }
     }
+  }
+
+  fn current_profile(
+    &self
+  ) -> Option<&LoadedSoundFontProfile>
+  {
+    self
+      .profiles
+      .get(&self.active_profile_name)
   }
 }
 

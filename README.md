@@ -34,6 +34,7 @@ Symfose is being built to support:
   - `Tutorial`: step-by-step progression with configurable strictness
   - `Auto Play`: automatic playback with key reactivity
 - live volume slider in GUI (runtime gain adjustment)
+- live instrument profile switching in GUI (e.g., piano and acoustic guitar)
 - rich tracing logs to console and rolling files
 
 ## Quick Start
@@ -73,6 +74,7 @@ You can replace the bundled file with any compatible SF2 and adjust bank/preset 
 - Next song: `f1`
 - Binding summary hint: `f2`
 - Start selected song mode: `f5`
+- Song search: filter by title, artist, id, and tags
 
 ## Configuration
 
@@ -114,6 +116,16 @@ channel = 0
 maximum_polyphony = 128
 enable_reverb_and_chorus = true
 instrument_gain_multiplier = 1.35
+
+[audio.instrument_profiles.acoustic_guitar]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 24
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.1
 ```
 
 ## Song Format

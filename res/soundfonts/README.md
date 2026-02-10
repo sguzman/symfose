@@ -16,3 +16,8 @@ If configured path is missing, Symfose also checks common Linux system paths:
 - `/usr/share/sf2/FluidR3_GM.sf2`
 
 For best realism, prefer a dedicated piano SF2 or a high-quality GM SoundFont with a strong acoustic grand preset.
+
+Current default profiles use this bundled GM file for:
+
+- `piano` (`preset = 0`)
+- `acoustic_guitar` (`preset = 24`)

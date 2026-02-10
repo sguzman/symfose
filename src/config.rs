@@ -580,6 +580,22 @@ fn default_instrument_profiles()
     "piano".to_string(),
     InstrumentProfile::default()
   );
+  map.insert(
+    "acoustic_guitar".to_string(),
+    InstrumentProfile::Soundfont(
+      SoundFontProfile {
+        soundfont_path:
+          "res/soundfonts/piano.sf2"
+            .to_string(),
+        bank: 0,
+        preset: 24,
+        channel: 0,
+        maximum_polyphony: 96,
+        enable_reverb_and_chorus: true,
+        instrument_gain_multiplier: 1.1
+      }
+    )
+  );
   map
 }
 
