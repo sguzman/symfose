@@ -62,6 +62,26 @@ maximum_polyphony = 96
 enable_reverb_and_chorus = true
 instrument_gain_multiplier = 1.2
 
+[audio.instrument_profiles.viola]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 41
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.18
+
+[audio.instrument_profiles.cello]
+engine = "soundfont"
+soundfont_path = "res/soundfonts/piano.sf2"
+bank = 0
+preset = 42
+channel = 0
+maximum_polyphony = 96
+enable_reverb_and_chorus = true
+instrument_gain_multiplier = 1.18
+
 [audio.instrument_profiles.clarinet]
 engine = "soundfont"
 soundfont_path = "res/soundfonts/piano.sf2"
@@ -146,8 +166,8 @@ warn_on_missing_song_notes = true
 optimize_bindings_for_song = false
 auto_jump_pressed_key_into_view = false
 piano_visible_white_keys = 18
-song_lane_units_per_line = 36
-song_lane_unit_width_px = 34.0
+song_lane_units_per_line = 16
+song_lane_unit_width_px = 25.0
 song_lane_tile_height_px = 46.0
 
 [control_bindings]

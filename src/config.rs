@@ -799,6 +799,14 @@ fn default_instrument_profiles()
     sf2_profile(40, 96, 1.2)
   );
   map.insert(
+    "viola".to_string(),
+    sf2_profile(41, 96, 1.18)
+  );
+  map.insert(
+    "cello".to_string(),
+    sf2_profile(42, 96, 1.18)
+  );
+  map.insert(
     "clarinet".to_string(),
     sf2_profile(71, 96, 1.16)
   );
