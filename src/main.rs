@@ -1135,7 +1135,9 @@ fn song_timeline_panel(
       .notes
       .iter()
       .map(|note| {
-        app.primary_binding_label(*note)
+        app.binding_label_for_song_note(
+          *note
+        )
       })
       .collect::<Vec<_>>()
       .join(" ");
@@ -1912,6 +1914,36 @@ impl PianoApp {
       })
   }
 
+  fn song_input_note(
+    &self,
+    note: u8
+  ) -> Option<u8> {
+    let shifted = i16::from(note)
+      + i16::from(
+        self
+          .prepared_transpose_semitones
+      );
+    (0..=127)
+      .contains(&shifted)
+      .then_some(shifted as u8)
+  }
+
+  fn binding_label_for_song_note(
+    &self,
+    note: u8
+  ) -> String {
+    self
+      .song_input_note(note)
+      .map_or_else(
+        || "-".to_string(),
+        |input_note| {
+          self.primary_binding_label(
+            input_note
+          )
+        }
+      )
+  }
+
   fn guided_notes(
     &self
   ) -> HashSet<u8> {
@@ -1936,7 +1968,14 @@ impl PianoApp {
           )
         {
           notes.extend(
-            event.notes.iter().copied()
+            event
+              .notes
+              .iter()
+              .filter_map(|note| {
+                self.song_input_note(
+                  *note
+                )
+              })
           );
         }
       }
@@ -1953,7 +1992,11 @@ impl PianoApp {
               event
                 .notes
                 .iter()
-                .copied()
+                .filter_map(|note| {
+                  self.song_input_note(
+                    *note
+                  )
+                })
             );
           }
         }
@@ -2283,8 +2326,15 @@ impl PianoApp {
             .iter()
             .enumerate()
         {
-          if expected.midi_note
-            != midi_note
+          let Some(expected_note) =
+            self.song_input_note(
+              expected.midi_note
+            )
+          else {
+            continue;
+          };
+
+          if expected_note != midi_note
           {
             continue;
           }
@@ -2357,8 +2407,15 @@ impl PianoApp {
           )
           .cloned()
         {
-          let correct = event
+          let expected_notes = event
             .notes
+            .iter()
+            .filter_map(|note| {
+              self
+                .song_input_note(*note)
+            })
+            .collect::<HashSet<_>>();
+          let correct = expected_notes
             .contains(&midi_note);
 
           if correct {
@@ -2366,12 +2423,8 @@ impl PianoApp {
               .tutorial_matched
               .insert(midi_note);
 
-            let expected_unique = event
-              .notes
-              .iter()
-              .copied()
-              .collect::<HashSet<_>>()
-              .len();
+            let expected_unique =
+              expected_notes.len();
 
             if playback
               .tutorial_matched
@@ -2399,7 +2452,7 @@ impl PianoApp {
                   .notes
                   .iter()
                   .map(|note| self
-                    .primary_binding_label(
+                    .binding_label_for_song_note(
                       *note
                     ))
                   .collect::<Vec<_>>()
@@ -2450,7 +2503,13 @@ impl PianoApp {
           event.velocity,
           event.duration_ms
         );
-      self.flash_note(*midi_note);
+      if let Some(input_note) =
+        self.song_input_note(*midi_note)
+      {
+        self.flash_note(input_note);
+      } else {
+        self.flash_note(*midi_note);
+      }
     }
   }
 
@@ -2806,10 +2865,15 @@ fn ergonomic_left_keys(
   match layout {
     | KeyboardLayout::Ansi104 => {
       vec![
-        "f", "d", "s", "a", "g", "r",
-        "e", "w", "q", "v", "c", "x",
-        "z", "t", "b", "5", "4", "3",
-        "2", "1", "`",
+        // Home row first.
+        "f", "d", "s", "a",
+        // Near home (top + bottom).
+        "g", "r", "e", "w", "q", "v",
+        "c", "x", "z", "t", "b",
+        // Punctuation and far reach.
+        "`", "[",
+        // Number row last.
+        "5", "4", "3", "2", "1",
       ]
       .into_iter()
       .map(str::to_string)
@@ -2824,11 +2888,16 @@ fn ergonomic_right_keys(
   match layout {
     | KeyboardLayout::Ansi104 => {
       vec![
-        "j", "k", "l", ";", "h", "u",
-        "i", "o", "p", "n", "m", ",",
-        ".", "/", "'", "6", "7", "8",
-        "9", "0", "-", "=", "[", "]",
-        "\\",
+        // Home row first.
+        "j", "k", "l", ";",
+        // Near home (top + bottom).
+        "h", "u", "i", "o", "p", "n",
+        "m",
+        // Punctuation and far reach.
+        ",", ".", "/", "'", "]", "\\",
+        "-", "=",
+        // Number row last.
+        "6", "7", "8", "9", "0",
       ]
       .into_iter()
       .map(str::to_string)
@@ -2868,21 +2937,19 @@ fn prepare_song_for_bindings(
     0
   };
 
-  let adapted_song = if transpose != 0 {
-    transpose_song_by_semitones(
-      source_song,
-      transpose
-    )
-  } else {
-    source_song.clone()
-  };
-
   let prepared =
-    prepare_song(&adapted_song);
+    prepare_song(source_song);
   let mut missing = prepared
     .expected_notes
     .iter()
-    .map(|entry| entry.midi_note)
+    .filter_map(|entry| {
+      let shifted =
+        i16::from(entry.midi_note)
+          + i16::from(transpose);
+      (0..=127)
+        .contains(&shifted)
+        .then_some(shifted as u8)
+    })
     .filter(|note| {
       !available_notes.contains(note)
     })
@@ -2946,26 +3013,6 @@ fn choose_transpose_for_fit(
   }
 
   best_shift
-}
-
-fn transpose_song_by_semitones(
-  source: &SongFile,
-  semitones: i8
-) -> SongFile {
-  let mut cloned = source.clone();
-  let delta = i16::from(semitones);
-
-  for event in &mut cloned.events {
-    for note in &mut event.notes {
-      let shifted =
-        i16::from(*note) + delta;
-      if (0..=127).contains(&shifted) {
-        *note = shifted as u8;
-      }
-    }
-  }
-
-  cloned
 }
 
 fn prepare_song(
